@@ -2,12 +2,16 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install system dependencies
+# Install system dependencies. ffmpeg is required at runtime for the
+# audio-track probing (/api/tracks) and remuxing (/remux) features --
+# without it those endpoints fail since neither ffmpeg nor ffprobe would
+# otherwise exist in this image.
 RUN apt-get update && apt-get install -y \
     build-essential \
     libssl-dev \
     libffi-dev \
     python3-dev \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies
