@@ -2,102 +2,82 @@ import math
 from telethon import TelegramClient
 from telethon.tl.types import Document, Photo
 from fastapi import Request, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response
 import logging
 
 logger = logging.getLogger(__name__)
 
-async def ultra_high_speed_streamer(clients: list, file, start: int, end: int, chunk_size: int = 1024 * 1024):
+CHUNK = 1024 * 1024  # Telegram's max request size
+
+
+async def ultra_high_speed_streamer(clients: list, file, start: int, end: int, chunk_size: int = CHUNK):
     """
-    Refactored ultra-high-speed multi-session streamer.
-    Uses sequential download for single-session to avoid throttling,
-    and optimized parallel download for multi-session.
+    Stream bytes [start, end] of a Telegram file in order, as fast as possible.
+
+    - Many 1 MB chunks are downloaded IN PARALLEL (several per session, spread
+      over every session) and handed out in order, so the player gets data as
+      fast as the connection allows instead of one slow round trip at a time.
+    - Chunks are always requested on 1 MB boundaries (Telegram's rule), then the
+      first/last one is trimmed, so seeking to any byte works.
+    - Only a small window of chunks is kept ahead, so a slow phone can't make the
+      server run out of memory.
     """
     import asyncio
-    total_to_send = end - start + 1
-    bytes_sent = 0
-    
-    session_count = len(clients)
-    
-    # If only one session (especially if it's a bot), parallel chunking can be counter-productive
-    # due to Telegram's per-connection limits. Sequential is safer and often faster for bots.
-    if session_count == 1:
-        logger.info(f"Single session detected. Using sequential streaming for stability.")
-        try:
-            async for chunk in clients[0].iter_download(file, offset=start, limit=total_to_send, request_size=chunk_size):
-                if not chunk: continue
-                yield bytes(chunk)
-                bytes_sent += len(chunk)
-            return
-        except Exception as e:
-            logger.error(f"Sequential stream failed: {e}. Falling back to parallel.")
-            # Reset and try parallel if sequential fails
+    from collections import deque
 
-    # Multi-session parallel logic
-    concurrency_per_session = 8
-    total_concurrency = concurrency_per_session * session_count
-    
-    logger.info(f"Starting multi-session parallel stream: {session_count} sessions, {total_concurrency} workers")
-    
-    offsets = list(range(start, end + 1, chunk_size))
-    chunk_queue = asyncio.Queue()
-    for offset in offsets:
-        remaining = end - offset + 1
-        current_chunk_size = min(chunk_size, remaining)
-        chunk_queue.put_nowait((offset, current_chunk_size))
-    
-    received_chunks = {}
-    completion_event = asyncio.Event()
-    
-    async def fetch_worker(client: TelegramClient, worker_id: int):
-        while True:
+    n = len(clients)
+    per_client = 6                           # parallel requests per session
+    window = min(2 * per_client * n, 24)     # chunks downloading or waiting to be sent
+    sems = [asyncio.Semaphore(per_client) for _ in range(n)]
+    aligned = start - (start % chunk_size)
+
+    async def fetch(i: int, pos: int) -> bytes:
+        need = min(chunk_size, end + 1 - pos)
+        last_err = None
+        for attempt in range(4):
+            ci = (i + attempt) % n
             try:
-                offset, size = chunk_queue.get_nowait()
-            except asyncio.QueueEmpty:
-                break
-            
-            success = False
-            for attempt in range(3):
-                try:
-                    chunk = b""
-                    async for part in client.iter_download(file, offset=offset, limit=size):
-                        chunk += part
-                    
-                    if len(chunk) > 0:
-                        received_chunks[offset] = chunk
-                        chunk_queue.task_done()
-                        completion_event.set()
-                        success = True
-                        break
-                except Exception as e:
-                    await asyncio.sleep((attempt + 1) * 1)
-            
-            if not success:
-                chunk_queue.put_nowait((offset, size))
-                await asyncio.sleep(2)
+                async with sems[ci]:
+                    buf = bytearray()
+                    # limit=1 -> exactly one chunk (Telethon's limit counts chunks, not bytes)
+                    async for part in clients[ci].iter_download(
+                            file, offset=pos, limit=1, chunk_size=chunk_size, request_size=chunk_size):
+                        buf += part
+                if len(buf) >= need:
+                    return bytes(buf)
+                last_err = IOError(f"short chunk at {pos}: {len(buf)}/{need}")
+            except Exception as ex:  # CancelledError is not an Exception, so it passes through
+                last_err = ex
+            await asyncio.sleep(0.3 * (attempt + 1))
+        raise last_err
 
-    workers = [asyncio.create_task(fetch_worker(clients[i % session_count], i)) for i in range(total_concurrency)]
-    
-    next_offset = start
-    while bytes_sent < total_to_send:
-        if next_offset in received_chunks:
-            chunk = received_chunks.pop(next_offset)
-            if bytes_sent + len(chunk) > total_to_send:
-                chunk = chunk[:total_to_send - bytes_sent]
-            yield bytes(chunk)
-            bytes_sent += len(chunk)
-            next_offset += len(chunk)
-        else:
-            completion_event.clear()
-            try:
-                await asyncio.wait_for(completion_event.wait(), timeout=20.0)
-            except asyncio.TimeoutError:
-                if bytes_sent >= total_to_send: break
-                logger.warning(f"Still waiting for chunk at offset {next_offset}...")
-                if all(w.done() for w in workers): break
+    positions = iter(enumerate(range(aligned, end + 1, chunk_size)))
+    tasks = deque()
 
-    for w in workers: w.cancel()
-    logger.info(f"Stream finished. Total: {bytes_sent/1024/1024:.2f} MB")
+    def fill():
+        while len(tasks) < window:
+            nxt = next(positions, None)
+            if nxt is None:
+                return
+            i, pos = nxt
+            tasks.append((pos, asyncio.ensure_future(fetch(i, pos))))
+
+    sent = 0
+    try:
+        fill()
+        while tasks:
+            pos, task = tasks.popleft()
+            data = await task
+            fill()
+            lo = max(start, pos) - pos
+            hi = min(end + 1, pos + len(data)) - pos
+            if hi > lo:
+                yield data[lo:hi]
+                sent += hi - lo
+    finally:
+        for _, task in tasks:
+            task.cancel()
+        logger.info(f"Stream closed after {sent / 1048576:.1f} MB")
 
 async def media_streamer(clients: list[TelegramClient], file, start: int, end: int):
     """
@@ -163,39 +143,56 @@ async def media_streamer(clients: list[TelegramClient], file, start: int, end: i
                 break
 
 def get_range_header(request: Request, file_size: int):
+    """Return (start, end) for the request, or None if the range can't be satisfied."""
     range_header = request.headers.get("Range")
     if not range_header:
         return 0, file_size - 1
-
     try:
-        range_val = range_header.replace("bytes=", "")
-        start_str, end_str = range_val.split("-")
-        start = int(start_str) if start_str else 0
-        end = int(end_str) if end_str else file_size - 1
+        spec = range_header.replace("bytes=", "").split(",")[0].strip()
+        start_str, end_str = spec.split("-")
+        if start_str == "":                      # "-500" = the last 500 bytes
+            start = max(file_size - int(end_str), 0)
+            end = file_size - 1
+        else:
+            start = int(start_str)
+            end = int(end_str) if end_str else file_size - 1
     except ValueError:
         return 0, file_size - 1
+    end = min(end, file_size - 1)
+    if start > end or start >= file_size:
+        return None
+    return start, end
 
-    return start, min(end, file_size - 1)
 
-async def get_streaming_response(clients: list[TelegramClient], file, file_size: int, filename: str, mime_type: str, request: Request):
-    start, end = get_range_header(request, file_size)
-    
+def _content_disposition(filename: str, inline: bool) -> str:
+    """Header-safe filename (emoji / non-English names used to crash the response)."""
+    from urllib.parse import quote
+    ascii_name = filename.encode("ascii", "ignore").decode().replace('"', "").replace("\\", "").strip() or "video"
+    return f"{'inline' if inline else 'attachment'}; filename=\"{ascii_name}\"; filename*=UTF-8\'\'{quote(filename)}"
+
+
+async def get_streaming_response(clients: list[TelegramClient], file, file_size: int, filename: str, mime_type: str, request: Request, inline: bool = False):
+    rng = get_range_header(request, file_size)
+    if rng is None:
+        return Response(status_code=416, headers={"Content-Range": f"bytes */{file_size}"})
+    start, end = rng
+
     headers = {
-        "Content-Range": f"bytes {start}-{end}/{file_size}",
         "Accept-Ranges": "bytes",
         "Content-Length": str(end - start + 1),
         "Content-Type": mime_type,
-        "Content-Disposition": f'attachment; filename="{filename}"',
-        "Cache-Control": "public, max-age=31536000",  # 1 year caching for CDN
+        "Content-Disposition": _content_disposition(filename, inline),
+        "Cache-Control": "public, max-age=31536000",
         "Access-Control-Allow-Origin": "*",
+        "X-Accel-Buffering": "no",  # tell proxies (nginx) not to hold the stream back
     }
+    partial = bool(request.headers.get("Range"))
+    if partial:
+        headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
 
-    status_code = 206 if request.headers.get("Range") else 200
-
-    # Use ultra-high-speed streamer for maximum performance
     return StreamingResponse(
         ultra_high_speed_streamer(clients, file, start, end),
-        status_code=status_code,
+        status_code=206 if partial else 200,
         headers=headers
     )
 
