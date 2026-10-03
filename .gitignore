@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+
+# Environment
+.env
+*.session
+*.session-journal
+
+# Project specific
+fast_mongodb_data/
+nginx/logs/
+app/static/temp/

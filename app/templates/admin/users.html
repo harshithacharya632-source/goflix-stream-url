@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+
+{% block title %}Manage Users - Admin{% endblock %}
+
+{% block content %}
+<div class="glass-card p-8">
+    <h2 class="text-3xl font-bold mb-8">User Management</h2>
+
+    <div class="overflow-x-auto">
+        <table class="w-full text-left border-collapse">
+            <thead>
+                <tr class="border-b border-white/10">
+                    <th class="py-4 px-4 font-bold">User ID</th>
+                    <th class="py-4 px-4 font-bold">Username</th>
+                    <th class="py-4 px-4 font-bold">Name</th>
+                    <th class="py-4 px-4 font-bold">Status</th>
+                    <th class="py-4 px-4 font-bold">Joined At</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for user in users %}
+                <tr class="border-b border-white/5 hover:bg-white/5 transition">
+                    <td class="py-4 px-4">{{ user.user_id }}</td>
+                    <td class="py-4 px-4 text-indigo-400">@{{ user.username or 'N/A' }}</td>
+                    <td class="py-4 px-4">{{ user.first_name }} {{ user.last_name or '' }}</td>
+                    <td class="py-4 px-4">
+                        {% if user.is_banned %}
+                        <span class="bg-red-500/20 text-red-400 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider">Banned</span>
+                        {% else %}
+                        <span class="bg-green-500/20 text-green-400 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider">Active</span>
+                        {% endif %}
+                    </td>
+                    <td class="py-4 px-4 text-sm text-gray-400">{{ user.joined_at.strftime('%Y-%m-%d') }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

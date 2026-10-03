@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+
+{% block title %}Admin Dashboard - FastStream{% endblock %}
+
+{% block content %}
+<div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-12">
+    <div class="glass-card p-6">
+        <span class="text-gray-400 text-sm uppercase font-bold">Total Users</span>
+        <h2 class="text-4xl font-bold mt-2">{{ total_users }}</h2>
+    </div>
+    <div class="glass-card p-6">
+        <span class="text-gray-400 text-sm uppercase font-bold">Total Files</span>
+        <h2 class="text-4xl font-bold mt-2">{{ total_files }}</h2>
+    </div>
+    <div class="glass-card p-6">
+        <span class="text-gray-400 text-sm uppercase font-bold">CPU Usage</span>
+        <div class="w-full bg-white/10 rounded-full h-2.5 mt-4">
+            <div class="bg-indigo-600 h-2.5 rounded-full" style="width: {{ cpu }}%"></div>
+        </div>
+        <span class="text-sm mt-2 block">{{ cpu }}%</span>
+    </div>
+    <div class="glass-card p-6">
+        <span class="text-gray-400 text-sm uppercase font-bold">RAM Usage</span>
+        <div class="w-full bg-white/10 rounded-full h-2.5 mt-4">
+            <div class="bg-purple-600 h-2.5 rounded-full" style="width: {{ ram }}%"></div>
+        </div>
+        <span class="text-sm mt-2 block">{{ ram }}%</span>
+    </div>
+</div>
+
+<div class="grid md:grid-cols-2 gap-8">
+    <div class="glass-card p-8">
+        <h3 class="text-2xl font-bold mb-6">Recent Users</h3>
+        <div class="space-y-4">
+            <a href="/admin/users" class="block text-indigo-400 hover:underline">View All Users &rarr;</a>
+        </div>
+    </div>
+    <div class="glass-card p-8">
+        <h3 class="text-2xl font-bold mb-6">Recent Files</h3>
+        <div class="space-y-4">
+            <a href="/admin/files" class="block text-indigo-400 hover:underline">View All Files &rarr;</a>
+        </div>
+    </div>
+</div>
+{% endblock %}

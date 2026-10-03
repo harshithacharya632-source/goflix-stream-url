@@ -1,0 +1,353 @@
+{% extends "base.html" %}
+
+{% block title %}Watching: {{ file.filename }}{% endblock %}
+
+{% block content %}
+<link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css" />
+
+<style>
+    /* Audio Track Selector Styles */
+    .track-selector-container {
+        display: none;
+        margin-bottom: 1rem;
+    }
+    .track-selector-container.visible {
+        display: block;
+    }
+    .track-selector-bar {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        padding: 0.75rem 1.25rem;
+        background: rgba(255, 255, 255, 0.05);
+        backdrop-filter: blur(12px);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 1rem;
+    }
+    .track-selector-bar .track-icon {
+        width: 36px;
+        height: 36px;
+        background: linear-gradient(135deg, #6366f1, #a855f7);
+        border-radius: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        font-size: 0.9rem;
+    }
+    .track-selector-bar .track-label {
+        font-size: 0.8rem;
+        color: rgba(255,255,255,0.5);
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        white-space: nowrap;
+    }
+    .track-selector-bar select {
+        flex: 1;
+        min-width: 0;
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        color: white;
+        padding: 0.5rem 2rem 0.5rem 0.75rem;
+        border-radius: 0.5rem;
+        font-family: 'Outfit', sans-serif;
+        font-size: 0.9rem;
+        cursor: pointer;
+        outline: none;
+        transition: all 0.2s ease;
+        appearance: none;
+        -webkit-appearance: none;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: right 0.75rem center;
+    }
+    .track-selector-bar select:hover {
+        border-color: rgba(99, 102, 241, 0.5);
+        background-color: rgba(255, 255, 255, 0.12);
+    }
+    .track-selector-bar select:focus {
+        border-color: #6366f1;
+        box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+    }
+    .track-selector-bar select option {
+        background: #1a1a2e;
+        color: white;
+        padding: 0.5rem;
+    }
+    .track-loading {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-size: 0.85rem;
+        color: rgba(255,255,255,0.4);
+    }
+    .track-loading .spinner {
+        width: 14px;
+        height: 14px;
+        border: 2px solid rgba(255,255,255,0.1);
+        border-top-color: #6366f1;
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin {
+        to { transform: rotate(360deg); }
+    }
+    .track-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        padding: 0.2rem 0.6rem;
+        background: rgba(99, 102, 241, 0.15);
+        color: #818cf8;
+        border-radius: 0.4rem;
+        font-size: 0.75rem;
+        font-weight: 600;
+    }
+    .remux-notice {
+        display: none;
+        margin-top: 0.5rem;
+        padding: 0.6rem 1rem;
+        background: rgba(234, 179, 8, 0.08);
+        border: 1px solid rgba(234, 179, 8, 0.15);
+        border-radius: 0.75rem;
+        font-size: 0.8rem;
+        color: rgba(234, 179, 8, 0.8);
+    }
+    .remux-notice.visible {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+</style>
+
+<div class="max-w-4xl mx-auto">
+    <div class="glass-card overflow-hidden mb-4">
+        <video id="player" playsinline controls data-poster="/static/images/poster.jpg">
+            <source id="video-source" src="/stream/{{ file.short_code }}" type="{{ file.mime_type }}" />
+            <!-- Captions are optional -->
+        </video>
+    </div>
+
+    <!-- Audio Track Selector -->
+    <div id="track-selector-container" class="track-selector-container">
+        <div class="track-selector-bar">
+            <div class="track-icon">
+                <i class="fas fa-language"></i>
+            </div>
+            <div>
+                <div class="track-label">Audio Track</div>
+            </div>
+            <select id="audio-track-select" onchange="switchAudioTrack(this.value)">
+                <option value="-1">Loading tracks...</option>
+            </select>
+            <span id="track-badge" class="track-badge" style="display:none;">
+                <i class="fas fa-check-circle"></i>
+                <span id="track-badge-text">Default</span>
+            </span>
+        </div>
+        <div id="remux-notice" class="remux-notice">
+            <i class="fas fa-info-circle"></i>
+            <span>Playing with selected audio track via remux. Seeking may be limited.</span>
+        </div>
+    </div>
+
+    <div class="flex flex-col sm:flex-row gap-4 mb-8">
+        <a href="https://t.me/cantarellabots" target="_blank" class="flex-1 glass p-4 rounded-2xl flex items-center justify-center gap-3 hover:bg-white/10 transition group">
+            <div class="w-10 h-10 bg-indigo-500/20 rounded-full flex items-center justify-center text-indigo-400 group-hover:bg-indigo-500 group-hover:text-white transition">
+                <i class="fab fa-telegram-plane"></i>
+            </div>
+            <div class="text-left">
+                <span class="block text-xs text-gray-400 uppercase tracking-widest">Join Telegram</span>
+                <span class="font-bold">@CantarellaBots</span>
+            </div>
+        </a>
+        <a href="https://t.me/cantarella_wuwa" target="_blank" class="flex-1 glass p-4 rounded-2xl flex items-center justify-center gap-3 hover:bg-white/10 transition group">
+            <div class="w-10 h-10 bg-purple-500/20 rounded-full flex items-center justify-center text-purple-400 group-hover:bg-purple-500 group-hover:text-white transition">
+                <i class="fas fa-user-ninja"></i>
+            </div>
+            <div class="text-left">
+                <span class="block text-xs text-gray-400 uppercase tracking-widest">Developer</span>
+                <span class="font-bold">@cantarella_wuwa</span>
+            </div>
+        </a>
+    </div>
+
+    <div class="glass-card p-8">
+        <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-8">
+            <div>
+                <h1 class="text-3xl font-bold mb-2">{{ file.filename }}</h1>
+                <div class="flex gap-4 text-sm text-gray-400">
+                    <span><i class="fas fa-database mr-1"></i> {{ (file.file_size / (1024*1024))|round(2) }} MB</span>
+                    <span><i class="fas fa-clock mr-1"></i> {{ file.created_at.strftime('%Y-%m-%d') }}</span>
+                    <span><i class="fas fa-eye mr-1"></i> {{ file.access_count }} views</span>
+                </div>
+            </div>
+            <div class="flex gap-3">
+                <a href="/stream/{{ file.short_code }}" class="btn-gradient px-6 py-3 rounded-xl font-bold flex items-center gap-2">
+                    <i class="fas fa-download"></i> Download
+                </a>
+                <button onclick="copyLink()" class="glass px-6 py-3 rounded-xl font-bold flex items-center gap-2">
+                    <i class="fas fa-copy"></i> Copy
+                </button>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+            <div class="bg-white/5 p-4 rounded-2xl text-center">
+                <span class="block text-gray-400 text-xs uppercase tracking-wider mb-1">Status</span>
+                <span class="text-green-400 font-bold">Online</span>
+            </div>
+            <div class="bg-white/5 p-4 rounded-2xl text-center">
+                <span class="block text-gray-400 text-xs uppercase tracking-wider mb-1">Type</span>
+                <span class="font-bold">{{ file.mime_type.split('/')[-1]|upper }}</span>
+            </div>
+            <div class="bg-white/5 p-4 rounded-2xl text-center">
+                <span class="block text-gray-400 text-xs uppercase tracking-wider mb-1">Speed</span>
+                <span class="text-indigo-400 font-bold">Unlimited</span>
+            </div>
+            <div id="audio-tracks-count" class="bg-white/5 p-4 rounded-2xl text-center">
+                <span class="block text-gray-400 text-xs uppercase tracking-wider mb-1">Audio</span>
+                <span class="font-bold" id="audio-count-text">Detecting...</span>
+            </div>
+        </div>
+
+        <div class="space-y-4">
+            <h4 class="font-bold text-lg">Stream in Apps</h4>
+            <div class="flex flex-wrap gap-3">
+                <a href="vlc://{{ base_url }}/stream/{{ file.short_code }}" class="bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 px-4 py-2 rounded-lg flex items-center gap-2 transition">
+                    <i class="fas fa-play-circle"></i> VLC
+                </a>
+                <a href="mxplayer://{{ base_url }}/stream/{{ file.short_code }}" class="bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 px-4 py-2 rounded-lg flex items-center gap-2 transition">
+                    <i class="fas fa-play-circle"></i> MX Player
+                </a>
+                <a href="nplayer-http://{{ base_url }}/stream/{{ file.short_code }}" class="bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 px-4 py-2 rounded-lg flex items-center gap-2 transition">
+                    <i class="fas fa-play-circle"></i> nPlayer
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.plyr.io/3.7.8/plyr.polyfilled.js"></script>
+<script>
+    const SHORT_CODE = '{{ file.short_code }}';
+    const ORIGINAL_SRC = '/stream/' + SHORT_CODE;
+    const REMUX_BASE = '/remux/' + SHORT_CODE;
+    let currentAudioTrack = -1;  // -1 = using original stream
+    let tracksData = null;
+    let player = null;
+
+    // Initialize Plyr
+    player = new Plyr('#player', {
+        title: '{{ file.filename }}',
+        keyboard: { focused: true, global: true },
+        tooltips: { controls: true, seek: true },
+    });
+
+    // Fetch track info on page load
+    async function loadTracks() {
+        try {
+            const resp = await fetch('/api/tracks/' + SHORT_CODE);
+            if (!resp.ok) throw new Error('Failed to fetch tracks');
+            
+            tracksData = await resp.json();
+            
+            const audioTracks = tracksData.audio_tracks || [];
+            const countEl = document.getElementById('audio-count-text');
+            
+            if (audioTracks.length === 0) {
+                countEl.textContent = 'N/A';
+                return;
+            }
+            
+            countEl.textContent = audioTracks.length + ' Track' + (audioTracks.length > 1 ? 's' : '');
+            
+            if (tracksData.has_multiple_audio) {
+                // Show the track selector
+                const container = document.getElementById('track-selector-container');
+                container.classList.add('visible');
+                
+                const select = document.getElementById('audio-track-select');
+                select.innerHTML = '';
+                
+                // Add "Original (Direct Stream)" option
+                const defaultOpt = document.createElement('option');
+                defaultOpt.value = '-1';
+                defaultOpt.textContent = '\u25B6 Original Stream (Direct, Full Speed)';
+                select.appendChild(defaultOpt);
+                
+                // Add each audio track
+                audioTracks.forEach((track, idx) => {
+                    const opt = document.createElement('option');
+                    opt.value = track.audio_index;
+                    opt.textContent = track.label || ('Track ' + (idx + 1));
+                    select.appendChild(opt);
+                });
+                
+                // Show badge
+                const badge = document.getElementById('track-badge');
+                badge.style.display = 'inline-flex';
+                document.getElementById('track-badge-text').textContent = audioTracks.length + ' available';
+            }
+            
+        } catch (err) {
+            console.error('Track loading error:', err);
+            document.getElementById('audio-count-text').textContent = 'Error';
+        }
+    }
+
+    function switchAudioTrack(audioIndex) {
+        audioIndex = parseInt(audioIndex);
+        if (audioIndex === currentAudioTrack) return;
+        
+        const video = document.getElementById('player');
+        const source = document.getElementById('video-source');
+        const notice = document.getElementById('remux-notice');
+        
+        // Save current playback position
+        const currentTime = player.currentTime || 0;
+        const wasPlaying = player.playing;
+        
+        if (audioIndex === -1) {
+            // Switch back to original direct stream
+            source.src = ORIGINAL_SRC;
+            source.type = '{{ file.mime_type }}';
+            notice.classList.remove('visible');
+        } else {
+            // Switch to remuxed stream with selected audio
+            source.src = REMUX_BASE + '?audio=' + audioIndex;
+            source.type = 'video/mp4';
+            notice.classList.add('visible');
+        }
+        
+        currentAudioTrack = audioIndex;
+        
+        // Reload the video
+        video.load();
+        
+        // Try to restore playback position (works for original stream, limited for remux)
+        if (audioIndex === -1 && currentTime > 0) {
+            video.addEventListener('loadedmetadata', function onLoad() {
+                video.currentTime = currentTime;
+                if (wasPlaying) video.play();
+                video.removeEventListener('loadedmetadata', onLoad);
+            });
+        } else {
+            video.addEventListener('canplay', function onCanPlay() {
+                if (wasPlaying) video.play();
+                video.removeEventListener('canplay', onCanPlay);
+            });
+        }
+    }
+
+    function copyLink() {
+        const url = window.location.href;
+        navigator.clipboard.writeText(url).then(() => {
+            alert('Link copied to clipboard!');
+        });
+    }
+
+    // Load tracks on page ready
+    loadTracks();
+</script>
+{% endblock %}
