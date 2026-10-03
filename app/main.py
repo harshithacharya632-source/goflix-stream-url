@@ -38,7 +38,16 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Goflix Stream URL", lifespan=lifespan)
 
 # Enable Compression
-app.add_middleware(GZipMiddleware, minimum_size=1000)
+class _GZipNotMedia(GZipMiddleware):
+    """Gzip pages/JSON only. Gzipping video wastes CPU, breaks Content-Length and stops downloads from resuming."""
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and scope["path"].startswith(("/stream", "/dl", "/remux")):
+            await self.app(scope, receive, send)
+            return
+        await super().__call__(scope, receive, send)
+
+
+app.add_middleware(_GZipNotMedia, minimum_size=1000)
 
 # Mount Static Files & Templates
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
@@ -122,7 +131,8 @@ async def stream_file(request: Request, message_id: int, filename: str | None = 
         file_size=file_info.size,
         filename=file_info.name or f"file_{message_id}",
         mime_type=file_info.mime_type or "application/octet-stream",
-        request=request
+        request=request,
+        inline=request.url.path.startswith("/stream")
     )
     if hasattr(response, "body_iterator"):
         response.body_iterator = _count_stream(response.body_iterator)
@@ -162,18 +172,17 @@ def _mem_percent():
         return None
 
 
-# The page's "Active streams" shows this baseline (it rotates between these
-# values every few seconds, the same for every visitor) PLUS the real number of
-# live streams, so it goes higher as more people watch.
-# Set to () to show only the real count.
-STREAM_BASELINE = (7, 5, 13)
+# "Active streams" on the page: a number between 1 and 30 that reshuffles every
+# 4 seconds (same for every visitor) PLUS the real number of live streams.
+# Set STREAM_RANGE = None to show only the real count.
+STREAM_RANGE = (1, 30)
 
 
 def _watching_now():
-    if not STREAM_BASELINE:
+    if not STREAM_RANGE:
         return _active_streams
-    window = int(time.time() // 5)
-    return random.Random(window).choice(STREAM_BASELINE) + _active_streams
+    window = int(time.time() // 4)
+    return random.Random(window).randint(*STREAM_RANGE) + _active_streams
 
 
 @app.get("/api/load")
