@@ -1,28 +1,25 @@
 FROM python:3.12-slim
 
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1
+
 WORKDIR /app
 
-# Install system dependencies. ffmpeg is required at runtime for the
-# audio-track probing (/api/tracks) and remuxing (/remux) features --
-# without it those endpoints fail since neither ffmpeg nor ffprobe would
-# otherwise exist in this image.
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    libssl-dev \
-    libffi-dev \
-    python3-dev \
-    ffmpeg \
+# ffmpeg is needed for /api/tracks (ffprobe) and /remux (audio track switching).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install -r requirements.txt
 
-# Copy project files
-COPY . .
+COPY app ./app
 
-# Expose port
+RUN useradd --create-home appuser
+USER appuser
+
 EXPOSE 8000
 
-# Start application
-CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
+# Koyeb injects $PORT; falls back to 8000 locally.
+CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
