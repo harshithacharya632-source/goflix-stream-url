@@ -2,12 +2,10 @@ from fastapi import FastAPI, Request, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import JSONResponse
-from app.database.connection import settings, files_col, create_indexes
+from app.database.connection import settings
 from app.streamer.manager import session_manager
 from app.streamer.engine import get_streaming_response, get_remux_response
 from app.streamer.probe import probe_tracks
-from app.bot.main import register_handlers
-from app.admin.routes import router as admin_router
 from fastapi.middleware.gzip import GZipMiddleware
 import uvicorn
 import asyncio
@@ -26,20 +24,15 @@ from contextlib import asynccontextmanager
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup logic
-    await create_indexes()
+    # Startup logic -- just the Telegram client(s), no bot commands, no DB.
     await session_manager.start()
-    register_handlers(session_manager.bot_client)
     logger.info("Application started")
     yield
     # Shutdown logic
     await session_manager.stop()
     logger.info("Application stopped")
 
-app = FastAPI(title="Telegram Direct Media Link Generator", lifespan=lifespan)
-
-# Include Routers
-app.include_router(admin_router)
+app = FastAPI(title="Goflix Stream URL", lifespan=lifespan)
 
 # Enable Compression
 app.add_middleware(GZipMiddleware, minimum_size=1000)
@@ -48,107 +41,90 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 templates = Jinja2Templates(directory="app/templates")
 
-@app.get("/")
-async def index(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
 
-@app.get("/watch/{short_code}")
-async def watch_page(request: Request, short_code: str):
-    file_data = await files_col.find_one({"short_code": short_code})
-    if not file_data:
-        raise HTTPException(status_code=404, detail="Link not found or expired")
-    
+async def _fetch_media(client, message_id: int):
+    """
+    Fetch a message from the configured log channel and unwrap its media.
+    Every route needs this, so it's centralized here instead of repeated
+    four times like in the original short_code-based version.
+    """
+    try:
+        msg = await client.get_messages(settings.CHANNEL_ID, ids=message_id)
+    except Exception as e:
+        logger.error(f"Error fetching message {message_id}: {e}")
+        raise HTTPException(status_code=500, detail="Error retrieving file from Telegram")
+
+    if not msg or not msg.media:
+        raise HTTPException(status_code=404, detail="File not found in log channel")
+
+    media = msg.media
+    if hasattr(media, 'document'):
+        media = media.document
+    elif hasattr(media, 'photo'):
+        media = media.photo
+
+    return msg, media
+
+
+@app.get("/watch/{message_id}")
+async def watch_page(request: Request, message_id: int):
+    client = session_manager.get_client()
+    msg, media = await _fetch_media(client, message_id)
+
+    file_info = msg.file  # Telethon's unified size/name/mime helper
+    file_data = {
+        "filename": file_info.name or f"file_{message_id}",
+        "file_size": file_info.size,
+        "mime_type": file_info.mime_type or "application/octet-stream",
+        "created_at": msg.date,
+    }
+
     return templates.TemplateResponse("watch.html", {
         "request": request,
         "file": file_data,
+        "message_id": message_id,
         "base_url": settings.BASE_URL.rstrip('/')
     })
 
-@app.get("/dl/{short_code}")
-@app.get("/stream/{short_code}")
-async def stream_file(request: Request, short_code: str):
-    file_data = await files_col.find_one({"short_code": short_code})
-    if not file_data:
-        raise HTTPException(status_code=404, detail="File not found")
 
-    # Use all available clients for ultra-high-speed downloads
+@app.get("/dl/{message_id}")
+@app.get("/stream/{message_id}")
+async def stream_file(request: Request, message_id: int):
     clients = session_manager.get_all_clients()
-    client = clients[0]  # Use first client for initial message fetch
-    
-    try:
-        # Fetch the message that contains the media
-        msg = await client.get_messages(file_data['chat_id'], ids=file_data['message_id'])
-        if not msg or not msg.media:
-            raise HTTPException(status_code=404, detail="Media no longer available on Telegram")
-        
-        file = msg.media
-        # Some media types are nested
-        if hasattr(file, 'document'):
-            file = file.document
-        elif hasattr(file, 'photo'):
-            file = file.photo
-            
-    except Exception as e:
-        logger.error(f"Error fetching file: {e}")
-        raise HTTPException(status_code=500, detail="Error retrieving file from Telegram")
+    client = clients[0]  # first client just to resolve the message/metadata
+    msg, media = await _fetch_media(client, message_id)
+    file_info = msg.file
 
     return await get_streaming_response(
-        clients,  # Pass ALL clients for parallel downloading
-        file=file,
-        file_size=file_data['file_size'],
-        filename=file_data['filename'],
-        mime_type=file_data['mime_type'],
+        clients,  # ALL clients, for parallel downloading
+        file=media,
+        file_size=file_info.size,
+        filename=file_info.name or f"file_{message_id}",
+        mime_type=file_info.mime_type or "application/octet-stream",
         request=request
     )
 
 
 # ─── Audio Track Discovery API ────────────────────────────────────────────────
 
-@app.get("/api/tracks/{short_code}")
-async def get_tracks(short_code: str):
+@app.get("/api/tracks/{message_id}")
+async def get_tracks(message_id: int):
     """Return available audio/video/subtitle tracks for a media file."""
-    file_data = await files_col.find_one({"short_code": short_code})
-    if not file_data:
-        raise HTTPException(status_code=404, detail="File not found")
-    
-    # Check if tracks are already cached in the database (and not an error result)
-    cached = file_data.get('tracks_info')
-    if False and cached and not cached.get('error'):
-        return JSONResponse(cached)
-    
-    # Need to probe the file
     client = session_manager.get_client()
-    
+    msg, media = await _fetch_media(client, message_id)
+
+    # Photos don't have audio tracks
+    if hasattr(msg.media, 'photo') and not hasattr(msg.media, 'document'):
+        return JSONResponse({
+            "video_tracks": [],
+            "audio_tracks": [],
+            "subtitle_tracks": [],
+            "has_multiple_audio": False
+        })
+
     try:
-        msg = await client.get_messages(file_data['chat_id'], ids=file_data['message_id'])
-        if not msg or not msg.media:
-            raise HTTPException(status_code=404, detail="Media no longer available")
-        
-        media = msg.media
-        
-        # Photos don't have audio tracks
-        if hasattr(media, 'photo') and not hasattr(media, 'document'):
-            return JSONResponse({
-                "video_tracks": [],
-                "audio_tracks": [],
-                "subtitle_tracks": [],
-                "has_multiple_audio": False
-            })
-        
-        # Pass the message for download_media fallback, and media for iter_download
-        tracks_info = await probe_tracks(client, msg, file_data['file_size'])
-        
-        # Only cache if no error
-        if not tracks_info.get('error'):
-            await files_col.update_one(
-                {"short_code": short_code},
-                {"$set": {"tracks_info": tracks_info}}
-            )
-        
+        tracks_info = await probe_tracks(client, msg, msg.file.size)
         return JSONResponse(tracks_info)
-        
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"Track probing error: {type(e).__name__}: {e}")
         raise HTTPException(status_code=500, detail="Failed to probe tracks")
@@ -156,41 +132,28 @@ async def get_tracks(short_code: str):
 
 # ─── Remux Streaming (Audio Track Selection) ──────────────────────────────────
 
-@app.get("/remux/{short_code}")
-async def remux_file(request: Request, short_code: str, audio: int = 0):
+@app.get("/remux/{message_id}")
+async def remux_file(request: Request, message_id: int, audio: int = 0):
     """
     Stream media remuxed with a selected audio track.
     Uses FFmpeg to remux (no transcoding) into fragmented MP4.
-    
+
     Query params:
         audio: Audio track index (0-based, default 0)
     """
-    file_data = await files_col.find_one({"short_code": short_code})
-    if not file_data:
-        raise HTTPException(status_code=404, detail="File not found")
-    
-    # Use a single client for sequential download (FFmpeg needs sequential input)
+    # A single client for sequential download -- FFmpeg needs sequential input.
     client = session_manager.get_client()
-    
+    msg, media = await _fetch_media(client, message_id)
+    file_info = msg.file
+
     try:
-        msg = await client.get_messages(file_data['chat_id'], ids=file_data['message_id'])
-        if not msg or not msg.media:
-            raise HTTPException(status_code=404, detail="Media no longer available")
-        
-        file = msg.media
-        if hasattr(file, 'document'):
-            file = file.document
-        elif hasattr(file, 'photo'):
-            file = file.photo
-        
         return await get_remux_response(
             client=client,
-            file=file,
-            file_size=file_data['file_size'],
-            filename=file_data['filename'],
+            file=media,
+            file_size=file_info.size,
+            filename=file_info.name or f"file_{message_id}",
             audio_track=audio
         )
-        
     except HTTPException:
         raise
     except Exception as e:
