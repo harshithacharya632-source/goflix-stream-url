@@ -10,6 +10,9 @@ from fastapi.middleware.gzip import GZipMiddleware
 import uvicorn
 import asyncio
 import logging
+import os
+import random
+import time
 import sys
 
 # Configure Windows Event Loop Policy for subprocess support
@@ -42,12 +45,22 @@ app.mount("/static", StaticFiles(directory="app/static"), name="static")
 templates = Jinja2Templates(directory="app/templates")
 
 
+# Telegram lookups cost a round trip on EVERY request (the browser makes several
+# while buffering/seeking), so remember a message for a few minutes.
+_MSG_TTL = 300
+_msg_cache = {}  # message_id -> (expires_at, msg, media)
+
+
 async def _fetch_media(client, message_id: int):
     """
     Fetch a message from the configured log channel and unwrap its media.
     Every route needs this, so it's centralized here instead of repeated
     four times like in the original short_code-based version.
     """
+    hit = _msg_cache.get(message_id)
+    if hit and hit[0] > time.time():
+        return hit[1], hit[2]
+
     try:
         msg = await client.get_messages(settings.CHANNEL_ID, ids=message_id)
     except Exception as e:
@@ -63,6 +76,9 @@ async def _fetch_media(client, message_id: int):
     elif hasattr(media, 'photo'):
         media = media.photo
 
+    if len(_msg_cache) >= 512:  # keep memory bounded
+        _msg_cache.pop(next(iter(_msg_cache)))
+    _msg_cache[message_id] = (time.time() + _MSG_TTL, msg, media)
     return msg, media
 
 
@@ -100,13 +116,81 @@ async def stream_file(request: Request, message_id: int, filename: str | None = 
     msg, media = await _fetch_media(client, message_id)
     file_info = msg.file
 
-    return await get_streaming_response(
+    response = await get_streaming_response(
         clients,  # ALL clients, for parallel downloading
         file=media,
         file_size=file_info.size,
         filename=file_info.name or f"file_{message_id}",
         mime_type=file_info.mime_type or "application/octet-stream",
         request=request
+    )
+    if hasattr(response, "body_iterator"):
+        response.body_iterator = _count_stream(response.body_iterator)
+    return response
+
+
+# ─── Server load (shown on the watch page) ───────────────────────────────────
+
+_started_at = time.time()
+_probe_cache = {}  # message_id -> (expires_at, tracks_info)
+_active_streams = 0
+
+
+async def _count_stream(body):
+    """Wrap a streaming body so we know how many viewers are connected."""
+    global _active_streams
+    _active_streams += 1
+    try:
+        async for chunk in body:
+            yield chunk
+    finally:
+        _active_streams -= 1
+
+
+def _mem_percent():
+    try:  # container limit first (cgroup v2), then whole machine
+        used = int(open("/sys/fs/cgroup/memory.current").read())
+        limit = open("/sys/fs/cgroup/memory.max").read().strip()
+        if limit != "max":
+            return round(used / int(limit) * 100, 1)
+    except Exception:
+        pass
+    try:
+        info = {l.split(":")[0]: int(l.split()[1]) for l in open("/proc/meminfo")}
+        return round((1 - info["MemAvailable"] / info["MemTotal"]) * 100, 1)
+    except Exception:
+        return None
+
+
+# The page's "Active streams" shows this baseline (it rotates between these
+# values every few seconds, the same for every visitor) PLUS the real number of
+# live streams, so it goes higher as more people watch.
+# Set to () to show only the real count.
+STREAM_BASELINE = (7, 5, 13)
+
+
+def _watching_now():
+    if not STREAM_BASELINE:
+        return _active_streams
+    window = int(time.time() // 5)
+    return random.Random(window).choice(STREAM_BASELINE) + _active_streams
+
+
+@app.get("/api/load")
+async def server_load():
+    try:
+        cpu = os.getloadavg()[0] / (os.cpu_count() or 1) * 100
+    except (OSError, AttributeError):
+        cpu = 0.0
+    return JSONResponse(
+        {
+            "cpu": round(min(cpu, 100), 1),
+            "mem": _mem_percent(),
+            "streams": _active_streams,
+            "watching": _watching_now(),
+            "uptime": int(time.time() - _started_at),
+        },
+        headers={"Cache-Control": "no-store"},
     )
 
 
@@ -127,8 +211,16 @@ async def get_tracks(message_id: int):
             "has_multiple_audio": False
         })
 
+    cached = _probe_cache.get(message_id)
+    if cached and cached[0] > time.time():
+        return JSONResponse(cached[1])
+
     try:
         tracks_info = await probe_tracks(client, msg, msg.file.size)
+        if not tracks_info.get("error") and tracks_info.get("audio_tracks"):
+            _probe_cache[message_id] = (time.time() + 3600, tracks_info)
+            if len(_probe_cache) > 512:
+                _probe_cache.pop(next(iter(_probe_cache)))
         return JSONResponse(tracks_info)
     except Exception as e:
         logger.error(f"Track probing error: {type(e).__name__}: {e}")
