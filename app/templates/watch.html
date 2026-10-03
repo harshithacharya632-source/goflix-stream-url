@@ -123,7 +123,7 @@
 <div class="max-w-4xl mx-auto">
     <div class="glass-card overflow-hidden mb-4">
         <video id="player" playsinline controls data-poster="/static/images/poster.jpg">
-            <source id="video-source" src="/stream/{{ file.short_code }}" type="{{ file.mime_type }}" />
+            <source id="video-source" src="/stream/{{ message_id }}" type="{{ file.mime_type }}" />
             <!-- Captions are optional -->
         </video>
     </div>
@@ -179,11 +179,10 @@
                 <div class="flex gap-4 text-sm text-gray-400">
                     <span><i class="fas fa-database mr-1"></i> {{ (file.file_size / (1024*1024))|round(2) }} MB</span>
                     <span><i class="fas fa-clock mr-1"></i> {{ file.created_at.strftime('%Y-%m-%d') }}</span>
-                    <span><i class="fas fa-eye mr-1"></i> {{ file.access_count }} views</span>
                 </div>
             </div>
             <div class="flex gap-3">
-                <a href="/stream/{{ file.short_code }}" class="btn-gradient px-6 py-3 rounded-xl font-bold flex items-center gap-2">
+                <a href="/stream/{{ message_id }}" class="btn-gradient px-6 py-3 rounded-xl font-bold flex items-center gap-2">
                     <i class="fas fa-download"></i> Download
                 </a>
                 <button onclick="copyLink()" class="glass px-6 py-3 rounded-xl font-bold flex items-center gap-2">
@@ -214,13 +213,13 @@
         <div class="space-y-4">
             <h4 class="font-bold text-lg">Stream in Apps</h4>
             <div class="flex flex-wrap gap-3">
-                <a href="vlc://{{ base_url }}/stream/{{ file.short_code }}" class="bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 px-4 py-2 rounded-lg flex items-center gap-2 transition">
+                <a id="vlc-link" href="vlc://{{ base_url }}/stream/{{ message_id }}" class="bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 px-4 py-2 rounded-lg flex items-center gap-2 transition">
                     <i class="fas fa-play-circle"></i> VLC
                 </a>
-                <a href="mxplayer://{{ base_url }}/stream/{{ file.short_code }}" class="bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 px-4 py-2 rounded-lg flex items-center gap-2 transition">
+                <a id="mx-link" href="mxplayer://{{ base_url }}/stream/{{ message_id }}" class="bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 px-4 py-2 rounded-lg flex items-center gap-2 transition">
                     <i class="fas fa-play-circle"></i> MX Player
                 </a>
-                <a href="nplayer-http://{{ base_url }}/stream/{{ file.short_code }}" class="bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 px-4 py-2 rounded-lg flex items-center gap-2 transition">
+                <a id="nplayer-link" href="nplayer-http://{{ base_url }}/stream/{{ message_id }}" class="bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 px-4 py-2 rounded-lg flex items-center gap-2 transition">
                     <i class="fas fa-play-circle"></i> nPlayer
                 </a>
             </div>
@@ -230,9 +229,10 @@
 
 <script src="https://cdn.plyr.io/3.7.8/plyr.polyfilled.js"></script>
 <script>
-    const SHORT_CODE = '{{ file.short_code }}';
+    const SHORT_CODE = '{{ message_id }}';
     const ORIGINAL_SRC = '/stream/' + SHORT_CODE;
     const REMUX_BASE = '/remux/' + SHORT_CODE;
+    const BASE_URL_JS = '{{ base_url }}';
     let currentAudioTrack = -1;  // -1 = using original stream
     let tracksData = null;
     let player = null;
@@ -243,6 +243,63 @@
         keyboard: { focused: true, global: true },
         tooltips: { controls: true, seek: true },
     });
+
+    // ─── Resume Playback ───────────────────────────────────────────────────
+    // Remembers where you stopped -- even days later -- and keeps the VLC/MX
+    // Player/nPlayer links pointed at the same spot you're currently at in
+    // the web player, not just the start of the file.
+    const videoEl = document.getElementById('player');
+    const RESUME_KEY = 'goflix_resume_' + SHORT_CODE;
+    const RESUME_SAVE_EVERY = 5; // seconds between localStorage writes
+    let lastSavedAt = -RESUME_SAVE_EVERY;
+
+    function getSavedPosition() {
+        try {
+            const raw = localStorage.getItem(RESUME_KEY);
+            return raw ? parseFloat(raw) : 0;
+        } catch (e) { return 0; }
+    }
+    function savePosition(t) {
+        try { localStorage.setItem(RESUME_KEY, String(Math.floor(t))); } catch (e) {}
+    }
+    function clearSavedPosition() {
+        try { localStorage.removeItem(RESUME_KEY); } catch (e) {}
+    }
+
+    // Updates the VLC/MX Player/nPlayer links to open at the current
+    // playback position, using the #t=<seconds> media-fragment convention
+    // these players read to start mid-file instead of from 0.
+    function updateExternalLinks() {
+        const t = Math.floor((player && player.currentTime) || 0);
+        const frag = t > 0 ? '#t=' + t : '';
+        const vlc = document.getElementById('vlc-link');
+        const mx = document.getElementById('mx-link');
+        const npl = document.getElementById('nplayer-link');
+        if (vlc) vlc.href = 'vlc://' + BASE_URL_JS + ORIGINAL_SRC + frag;
+        if (mx) mx.href = 'mxplayer://' + BASE_URL_JS + ORIGINAL_SRC + frag;
+        if (npl) npl.href = 'nplayer-http://' + BASE_URL_JS + ORIGINAL_SRC + frag;
+    }
+
+    // Only on the very first load -- not after a track switch reloads the
+    // element, which already restores its own in-session position.
+    videoEl.addEventListener('loadedmetadata', function initialResume() {
+        const saved = getSavedPosition();
+        if (saved > 5 && videoEl.duration && saved < videoEl.duration - 5) {
+            videoEl.currentTime = saved;
+        }
+        updateExternalLinks();
+    }, { once: true });
+
+    videoEl.addEventListener('timeupdate', () => {
+        const t = videoEl.currentTime || 0;
+        if (t - lastSavedAt >= RESUME_SAVE_EVERY) {
+            savePosition(t);
+            lastSavedAt = t;
+            updateExternalLinks();
+        }
+    });
+
+    videoEl.addEventListener('ended', clearSavedPosition);
 
     // Fetch track info on page load
     async function loadTracks() {
