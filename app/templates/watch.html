@@ -1,80 +1,76 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#0a0a0d">
+<meta name="theme-color" content="#0a0a0d" id="theme-meta">
 <title>{{ file.filename }} · GOFLIX</title>
+<script>try{var t=localStorage.getItem('goflix_theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);}catch(e){}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css">
+<link rel="stylesheet" href="/static/player.css?v=3">
 <style>
-:root{--red:#e50914;--red2:#ff2d3a;--bg:#0a0a0d;--card:#14141a;--line:#24242d;--mute:#8d8d9a;--ok:#2ecc71;--warn:#f5a524}
+:root{--red:#e50914;--red2:#ff2d3a;--bg:#0a0a0d;--card:#14141a;--line:#24242d;--mute:#8d8d9a;--text:#fff;--text2:#cfcfd8;--chip:#1d1d25;--glow:rgba(229,9,20,.28);--bar:#22222b;--ok:#2ecc71;--warn:#f5a524}
+[data-theme=light]{--bg:#f3f3f7;--card:#fff;--line:#e0e0e8;--mute:#6a6a78;--text:#111114;--text2:#3a3a46;--chip:#eeeef3;--glow:rgba(229,9,20,.12);--bar:#e3e3eb}
 *{box-sizing:border-box;margin:0}
 html{-webkit-text-size-adjust:100%}
-body{font-family:'Outfit',system-ui,sans-serif;color:#fff;min-height:100vh;
-  background:radial-gradient(900px 420px at 50% -120px,rgba(229,9,20,.28),transparent 70%),var(--bg);
-  padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+body{font-family:'Outfit',system-ui,sans-serif;color:var(--text);min-height:100vh;
+  background:radial-gradient(900px 420px at 50% -120px,var(--glow),transparent 70%),var(--bg);
+  padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom);transition:background .25s,color .25s}
 .wrap{max-width:980px;margin:0 auto;padding:0 14px}
 /* header */
-header{display:flex;align-items:center;justify-content:space-between;padding:16px 0}
+header{display:flex;align-items:center;justify-content:space-between;padding:14px 0;gap:10px}
 .logo{font-weight:800;font-size:1.7rem;letter-spacing:.12em;line-height:1}
-.logo .go{color:var(--red)}.logo .flix{color:#fff}
-.pill{display:flex;align-items:center;gap:8px;font-size:.78rem;font-weight:600;color:#dcdce3;background:var(--card);border:1px solid var(--line);padding:7px 12px;border-radius:99px}
-.dot{width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 0 rgba(46,204,113,.6);animation:pulse 2s infinite}
-@keyframes pulse{70%{box-shadow:0 0 0 7px rgba(46,204,113,0)}100%{box-shadow:0 0 0 0 rgba(46,204,113,0)}}
+.logo .go{color:var(--red)}
+.right{display:flex;align-items:center;gap:8px}
+.pill{display:flex;align-items:center;gap:7px;font-size:.74rem;font-weight:700;letter-spacing:.06em;color:var(--red2);background:rgba(229,9,20,.1);border:1px solid rgba(229,9,20,.45);padding:7px 11px;border-radius:99px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--red2);animation:pulse 2s infinite}
+.pill.off{color:var(--mute);background:var(--card);border-color:var(--line)}.pill.off .dot{background:var(--mute);animation:none}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(255,45,58,.6)}70%{box-shadow:0 0 0 7px rgba(255,45,58,0)}100%{box-shadow:0 0 0 0 rgba(255,45,58,0)}}
+.theme{display:flex;align-items:center;gap:7px;font:600 .8rem 'Outfit',sans-serif;color:var(--text);background:var(--card);border:1px solid var(--line);padding:7px 12px;border-radius:99px;cursor:pointer}
+.theme svg{width:15px;height:15px;fill:currentColor}
 /* title */
-.title-block{padding:18px 0 2px}
-h1{font-size:clamp(1.25rem,4.6vw,2rem);font-weight:700;line-height:1.25;overflow-wrap:anywhere;word-break:break-word}
+.title-block{padding:20px 0 2px}
+h1{font-size:clamp(1.15rem,4.4vw,1.8rem);font-weight:700;line-height:1.25;overflow-wrap:anywhere;word-break:break-word}
 .chips{display:flex;flex-wrap:wrap;gap:7px;margin-top:11px}
-.chip{font-size:.72rem;font-weight:700;letter-spacing:.04em;padding:4px 9px;border-radius:6px;background:#1d1d25;color:#d6d6de;border:1px solid var(--line)}
+.chip{font-size:.72rem;font-weight:700;letter-spacing:.04em;padding:4px 9px;border-radius:6px;background:var(--chip);color:var(--text2);border:1px solid var(--line)}
 .chip.hot{background:var(--red);border-color:var(--red);color:#fff}
 .meta{margin-top:10px;font-size:.85rem;color:var(--mute);display:flex;flex-wrap:wrap;gap:6px 16px}
-/* player */
-.player-box{position:relative;border-radius:14px;overflow:hidden;background:#000;border:1px solid var(--line);box-shadow:0 18px 50px rgba(0,0,0,.6),0 0 0 1px rgba(229,9,20,.08)}
-.player-box video{width:100%;display:block;max-height:78vh;background:#000}
-.plyr{--plyr-color-main:var(--red);--plyr-video-control-color:#fff;--plyr-font-family:'Outfit',sans-serif;--plyr-control-radius:8px;--plyr-range-thumb-height:14px;--plyr-tooltip-radius:6px}
-.plyr--video .plyr__control--overlaid{padding:22px;background:rgba(229,9,20,.92)}
-.plyr--video .plyr__control.plyr__tab-focus,.plyr--video .plyr__control:hover,.plyr--video .plyr__control[aria-expanded=true]{background:var(--red)}
-.buffering{position:absolute;left:12px;top:12px;display:flex;align-items:center;gap:8px;padding:7px 12px;border-radius:99px;background:rgba(0,0,0,.72);font-size:.78rem;font-weight:600;pointer-events:none;z-index:5;opacity:0;transition:opacity .2s}
+.buffering{position:absolute;display:flex;align-items:center;gap:8px;padding:7px 12px;border-radius:99px;background:rgba(0,0,0,.72);color:#fff;font-size:.78rem;font-weight:600;pointer-events:none;z-index:5;opacity:0;transition:opacity .2s}
 .buffering.show{opacity:1}
 .buffering i{width:13px;height:13px;border-radius:50%;border:2px solid rgba(255,255,255,.3);border-top-color:var(--red2);animation:spin .8s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 .banner{display:none;margin-top:12px;padding:12px 14px;border-radius:12px;font-size:.88rem;line-height:1.45}
 .banner.show{display:block}
 .banner.err{background:rgba(229,9,20,.12);border:1px solid rgba(229,9,20,.5)}
-.banner.info{background:rgba(245,165,36,.1);border:1px solid rgba(245,165,36,.45)}
 /* cards + buttons */
-.card{margin-top:14px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px}
-.card h2{font-size:.78rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--mute);margin-bottom:12px}
+.card{margin-top:14px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;transition:background .25s,border-color .25s}
+.card h2,.label{font-size:.76rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--mute);margin-bottom:12px}
 .actions{display:flex;gap:10px;margin-top:14px}
-.btn{flex:1;display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:13px 16px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:#fff;font:600 .95rem 'Outfit',sans-serif;text-decoration:none;cursor:pointer;transition:.18s}
-.btn:hover{border-color:#3a3a46;transform:translateY(-1px)}
-.btn.primary{background:linear-gradient(135deg,var(--red),var(--red2));border-color:transparent;box-shadow:0 8px 22px rgba(229,9,20,.35)}
+.btn{flex:1;display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:13px 16px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--text);font:600 .95rem 'Outfit',sans-serif;text-decoration:none;cursor:pointer;transition:.18s}
+.btn:hover{border-color:var(--mute);transform:translateY(-1px)}
+.btn.primary{background:linear-gradient(135deg,var(--red),var(--red2));color:#fff;border-color:transparent;box-shadow:0 8px 22px rgba(229,9,20,.3)}
 .btn svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .apps{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+.apps .btn{padding:13px 6px;font-size:.9rem}
 .hint{margin-top:12px;font-size:.8rem;color:var(--mute);line-height:1.5}
-.hint b{color:#cfcfd8}
-.apps .btn{padding:12px 6px;font-size:.88rem}
-select{width:100%;padding:13px 14px;border-radius:12px;background:#0f0f14;color:#fff;border:1px solid var(--line);font:500 .95rem 'Outfit',sans-serif;outline:none}
-select:focus{border-color:var(--red)}
-#track-card{display:none}#track-card.show{display:block}
+.hint b{color:var(--text2)}
 /* server load */
 .load-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
 .load-head h2{margin:0}
 .load-tag{font-size:.75rem;font-weight:700;padding:4px 10px;border-radius:99px;background:rgba(46,204,113,.14);color:var(--ok)}
 .load-tag.mid{background:rgba(245,165,36,.14);color:var(--warn)}.load-tag.high{background:rgba(229,9,20,.16);color:var(--red2)}
 .meters{display:grid;gap:13px}
-.meter .row{display:flex;justify-content:space-between;font-size:.85rem;margin-bottom:6px;color:#cfcfd8}
-.meter .row b{color:#fff}
-.bar{height:7px;border-radius:9px;background:#22222b;overflow:hidden}
+.meter .row{display:flex;justify-content:space-between;font-size:.85rem;margin-bottom:6px;color:var(--text2)}
+.meter .row b{color:var(--text)}
+.bar{height:7px;border-radius:9px;background:var(--bar);overflow:hidden}
 .bar i{display:block;height:100%;width:0;border-radius:9px;background:linear-gradient(90deg,var(--ok),#7be3a4);transition:width .6s ease,background .3s}
 .bar i.mid{background:linear-gradient(90deg,var(--warn),#ffd27a)}.bar i.high{background:linear-gradient(90deg,var(--red),var(--red2))}
-.streams{display:flex;justify-content:space-between;font-size:.85rem;color:#cfcfd8;padding-top:2px}
-.streams b{color:#fff}
-footer{text-align:center;color:#5f5f6b;font-size:.78rem;padding:26px 0 30px}
+.streams{display:flex;justify-content:space-between;font-size:.85rem;color:var(--text2);padding-top:2px}
+.streams b{color:var(--text)}
+footer{text-align:center;color:var(--mute);font-size:.78rem;padding:26px 0 30px}
 footer b{color:var(--red)}
-.toast{position:fixed;left:50%;bottom:calc(22px + env(safe-area-inset-bottom));transform:translate(-50%,30px);opacity:0;background:#fff;color:#111;font-weight:600;font-size:.88rem;padding:11px 18px;border-radius:99px;transition:.25s;pointer-events:none;z-index:99}
+.toast{position:fixed;left:50%;bottom:calc(22px + env(safe-area-inset-bottom));transform:translate(-50%,30px);opacity:0;background:#fff;color:#111;font-weight:600;font-size:.88rem;padding:11px 18px;border-radius:99px;transition:.25s;pointer-events:none;z-index:2000;box-shadow:0 6px 24px rgba(0,0,0,.35)}
 .toast.show{transform:translate(-50%,0);opacity:1}
 @media(min-width:700px){.wrap{padding:0 24px}}
 </style>
@@ -82,59 +78,63 @@ footer b{color:var(--red)}
 <body>
 <div class="wrap">
   <header>
-    <div class="logo"><span class="go">GO</span><span class="flix">FLIX</span></div>
-    <div class="pill"><span class="dot"></span><span id="pill-text">Online</span></div>
+    <div class="logo"><span class="go">GO</span>FLIX</div>
+    <div class="right">
+      <div class="pill" id="pill"><span class="dot"></span><span id="pill-text">LIVE</span></div>
+      <button class="theme" id="theme-btn" type="button" aria-label="Switch dark / light"></button>
+    </div>
   </header>
 
-  <div class="player-box">
-    <video id="player" playsinline controls preload="auto">
-      <source id="video-source" src="/stream/{{ message_id }}" type="{{ file.mime_type }}">
-    </video>
+  <!-- 1. PLAYER -->
+  <div class="pb hide" id="pb">
+    <video id="player" playsinline webkit-playsinline preload="auto" src="/stream/{{ message_id }}"></video>
     <div class="buffering" id="buffering"><i></i><span>Loading stream…</span></div>
+    <div class="hud" id="hud"></div>
+    <div class="skip" id="skipL" style="left:12%"></div><div class="skip" id="skipR" style="right:12%"></div>
+    <button class="big" id="big" aria-label="Play"></button>
+    <div class="ctl">
+      <div class="seek" id="seek"><i class="buf" id="sbuf"></i><i class="fill" id="sfill"></i><b id="sthumb"></b></div>
+      <div class="crow">
+        <button id="pp" aria-label="Play/Pause"></button><span class="tm" id="tm">0:00 / 0:00</span><span class="sp"></span>
+        <button id="mute" aria-label="Mute"></button><input type="range" id="vol" min="0" max="1" step="0.05" value="1">
+        <button id="spd" aria-label="Speed">1x</button><button id="fsb" aria-label="Fullscreen"></button>
+      </div>
+    </div>
   </div>
 
-  <div class="banner err" id="play-error">
-    <b>This browser can't play this file's video/audio format.</b>
-    Use <b>Stream in Apps</b> below (VLC or MX Player play almost everything), or download it.
-  </div>
-  <div class="banner info" id="remux-notice">
-    Audio track switched. This uses a converted stream, so seeking may be limited. Pick “Original” to go back.
+  <!-- shown when the browser can't play the video or has no audio -->
+  <div class="banner err" id="warn"><b id="warn-msg"></b>
+    <button class="btn primary" style="width:100%;margin-top:10px" onclick="document.getElementById('vlc-link').click()">Open in VLC</button></div>
+
+  <!-- 2. OPEN IN APP -->
+  <div class="card">
+    <h2>Open in app</h2>
+    <div class="apps">
+      <a class="btn" id="vlc-link" href="#">VLC</a>
+      <a class="btn" id="mx-link" href="#">MX Player</a>
+      <a class="btn" id="nplayer-link" href="#">nPlayer</a>
+      <a class="btn" id="playit-link" href="#">PLAYit</a>
+    </div>
+    <p class="hint"><b>Laptop:</b> tap Copy link, open VLC, press <b>Ctrl+N</b> (Mac: <b>⌘N</b>) → paste → Play.</p>
   </div>
 
-  <div class="title-block">
-    <h1 id="title" title="{{ file.filename }}">{{ file.filename }}</h1>
-    <div class="chips" id="chips"></div>
-    <div class="chips" id="media-info"><span class="chip">Detecting tracks…</span></div>
-    <div class="meta"><span id="meta-size"></span><span>{{ file.created_at.strftime('%d %b %Y') }}</span></div>
-  </div>
-
-  <div class="card" id="track-card">
-    <h2>Audio Track <span id="track-count" style="color:var(--red2)"></span></h2>
-    <select id="audio-track-select" onchange="switchAudioTrack(this.value)"></select>
-  </div>
-
+  <!-- 3. DOWNLOAD + COPY -->
   <div class="actions">
     <a class="btn primary" href="/stream/{{ message_id }}" download>
       <svg viewBox="0 0 24 24"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 21h16"/></svg>Download</a>
-    <button class="btn" onclick="copyLink()">
+    <button class="btn" type="button" onclick="copyLink()">
       <svg viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 012-2h10"/></svg>Copy link</button>
   </div>
 
-  <div class="card">
-    <h2>Stream in Apps</h2>
-    <div class="apps">
-      <a class="btn" id="vlc-link" href="vlc://{{ base_url }}/stream/{{ message_id }}">VLC</a>
-      <a class="btn" id="mx-link" href="mxplayer://{{ base_url }}/stream/{{ message_id }}">MX Player</a>
-      <a class="btn" id="nplayer-link" href="nplayer-http://{{ base_url }}/stream/{{ message_id }}">nPlayer</a>
-      <a class="btn" id="playit-link" href="#">PLAYit</a>
-    </div>
-    <button class="btn" style="width:100%;margin-top:10px" onclick="copyLink(true)">
-      <svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg>Copy link for VLC (laptop)</button>
-    <p class="hint"><b>Laptop:</b> copy the link, open VLC, press <b>Ctrl+N</b> (Mac: <b>⌘N</b>) → paste → Play. Phone apps above open directly.</p>
+  <!-- 4. TITLE / INFO -->
+  <div class="title-block">
+    <h1 id="title" title="{{ file.filename }}">{{ file.filename }}</h1>
+    <div class="chips" id="chips"></div>
+    <div class="meta"><span id="meta-size"></span><span>{{ file.created_at.strftime('%d %b %Y') }}</span></div>
   </div>
 
   <div class="card">
-    <div class="load-head"><h2>Server Load</h2><span class="load-tag" id="load-tag">…</span></div>
+    <div class="load-head"><h2>Server status</h2><span class="load-tag" id="load-tag">…</span></div>
     <div class="meters">
       <div class="meter"><div class="row"><span>CPU</span><b id="cpu-val">–</b></div><div class="bar"><i id="cpu-bar"></i></div></div>
       <div class="meter"><div class="row"><span>Memory</span><b id="mem-val">–</b></div><div class="bar"><i id="mem-bar"></i></div></div>
@@ -146,18 +146,26 @@ footer b{color:var(--red)}
 </div>
 <div class="toast" id="toast"></div>
 
-<script src="https://cdn.plyr.io/3.7.8/plyr.polyfilled.js"></script>
 <script>
 const SHORT_CODE = '{{ message_id }}';
 const ORIGINAL_SRC = '/stream/' + SHORT_CODE;
-const REMUX_BASE = '/remux/' + SHORT_CODE;
 const BASE_URL_JS = '{{ base_url }}';
 const FILENAME = {{ file.filename|tojson }};
 const FILE_SIZE = {{ file.file_size }};
-const MIME = {{ file.mime_type|tojson }};
 const $ = id => document.getElementById(id);
 $('yr').textContent = new Date().getFullYear();
-let currentAudioTrack = -1;
+
+// ── Dark / Light ──────────────────────────────────────────────────────────
+const MOON = '<svg viewBox="0 0 24 24"><path d="M21 14.5A9 9 0 119.5 3a7 7 0 0011.5 11.5z"/></svg>';
+const SUN = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.5"/><path d="M12 1v3M12 20v3M1 12h3M20 12h3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+function applyTheme(t) {
+  document.documentElement.setAttribute('data-theme', t);
+  $('theme-btn').innerHTML = (t === 'dark' ? MOON + 'Dark' : SUN + 'Light');
+  $('theme-meta').setAttribute('content', t === 'dark' ? '#0a0a0d' : '#f3f3f7');
+}
+applyTheme(document.documentElement.getAttribute('data-theme') || 'dark');
+$('theme-btn').onclick = () => { const t = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+  applyTheme(t); try { localStorage.setItem('goflix_theme', t); } catch (e) {} };
 
 // ── Title, chips, size ────────────────────────────────────────────────────
 (function(){
@@ -179,105 +187,18 @@ let currentAudioTrack = -1;
   $('meta-size').textContent = gb >= 1 ? gb.toFixed(2) + ' GB' : (FILE_SIZE / 1048576).toFixed(0) + ' MB';
 })();
 
-// ── Player ────────────────────────────────────────────────────────────────
-const player = new Plyr('#player', {
-  title: FILENAME,
-  seekTime: 10,
-  keyboard: { focused: true, global: true },
-  tooltips: { controls: true, seek: true },
-  controls: ['play-large','rewind','play','fast-forward','progress','current-time','duration','mute','volume','settings','pip','airplay','fullscreen'],
-  settings: ['speed','loop'],
-  speed: { selected: 1, options: [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2] },
-});
-const videoEl = $('player');
-
-['loadstart','waiting','seeking'].forEach(e => videoEl.addEventListener(e, () => $('buffering').classList.add('show')));
-['playing','canplay','error','pause'].forEach(e => videoEl.addEventListener(e, () => $('buffering').classList.remove('show')));
-videoEl.addEventListener('error', () => $('play-error').classList.add('show'));
-videoEl.addEventListener('playing', () => $('play-error').classList.remove('show'));
-
-// ── Resume playback ───────────────────────────────────────────────────────
-const RESUME_KEY = 'goflix_resume_' + SHORT_CODE;
-const SAVE_EVERY = 5;
-let lastSavedAt = -SAVE_EVERY;
-const getSaved = () => { try { return parseFloat(localStorage.getItem(RESUME_KEY)) || 0; } catch (e) { return 0; } };
-const setSaved = t => { try { localStorage.setItem(RESUME_KEY, String(Math.floor(t))); } catch (e) {} };
-const fmt = s => { s = Math.floor(s); const h = Math.floor(s/3600), m = Math.floor(s%3600/60), x = s%60;
-  return (h ? h + ':' + String(m).padStart(2,'0') : m) + ':' + String(x).padStart(2,'0'); };
-
-function updateExternalLinks() {
-  const t = Math.floor(player.currentTime || 0), frag = t > 0 ? '#t=' + t : '';
-  $('vlc-link').href = 'vlc://' + BASE_URL_JS + ORIGINAL_SRC + frag;
-  $('mx-link').href = 'mxplayer://' + BASE_URL_JS + ORIGINAL_SRC + frag;
-  $('nplayer-link').href = 'nplayer-http://' + BASE_URL_JS + ORIGINAL_SRC + frag;
-  $('playit-link').href = 'intent:' + BASE_URL_JS + ORIGINAL_SRC +
-    '#Intent;action=android.intent.action.VIEW;type=video/*;package=com.playit.videoplayer;end';
-}
-updateExternalLinks();
-videoEl.addEventListener('loadedmetadata', function first() {
-  const saved = getSaved();
-  if (saved > 5 && videoEl.duration && saved < videoEl.duration - 5) {
-    videoEl.currentTime = saved; toast('Resumed from ' + fmt(saved));
-  }
-  updateExternalLinks();
-}, { once: true });
-videoEl.addEventListener('timeupdate', () => {
-  const t = videoEl.currentTime || 0;
-  if (t - lastSavedAt >= SAVE_EVERY) { setSaved(t); lastSavedAt = t; updateExternalLinks(); }
-});
-videoEl.addEventListener('ended', () => { try { localStorage.removeItem(RESUME_KEY); } catch (e) {} });
-
-// ── Audio tracks ──────────────────────────────────────────────────────────
-let tracksLoaded = false;
-function chip(text, hot) { const s = document.createElement('span');
-  s.className = 'chip' + (hot ? ' hot' : ''); s.textContent = text; return s; }
-async function loadTracks() {
-  if (tracksLoaded) return; tracksLoaded = true;
-  const box = $('media-info');
-  try {
-    const r = await fetch('/api/tracks/' + SHORT_CODE);
-    if (!r.ok) throw 0;
-    const data = await r.json(), tracks = data.audio_tracks || [], subs = (data.subtitle_tracks || []).length;
-    box.innerHTML = '';
-    if (!tracks.length) { box.appendChild(chip('Tracks: unavailable')); return; }
-    box.appendChild(chip(tracks.length + ' audio track' + (tracks.length > 1 ? 's' : ''), tracks.length > 1));
-    box.appendChild(chip(subs + ' subtitle' + (subs === 1 ? '' : 's')));
-    if (!data.has_multiple_audio) return;
-    const sel = $('audio-track-select');
-    sel.innerHTML = '<option value="-1">▶ Original (direct, full speed)</option>';
-    tracks.forEach((t, i) => { const o = document.createElement('option');
-      o.value = t.audio_index; o.textContent = t.label || ('Track ' + (i + 1)); sel.appendChild(o); });
-    $('track-count').textContent = '· ' + tracks.length + ' available';
-    $('track-card').classList.add('show');
-  } catch (e) { tracksLoaded = false; box.innerHTML = ''; box.appendChild(chip('Tracks: unavailable')); }
-}
-// Track detection downloads 5 MB from Telegram. Wait until the video is playing
-// (or 12 s) so it never competes with the video for bandwidth.
-videoEl.addEventListener('playing', () => setTimeout(loadTracks, 1500), { once: true });
-setTimeout(loadTracks, 12000);
-function switchAudioTrack(v) {
-  v = parseInt(v); if (v === currentAudioTrack) return;
-  const src = $('video-source'), t = player.currentTime || 0, was = player.playing;
-  if (v === -1) { src.src = ORIGINAL_SRC; src.type = MIME; $('remux-notice').classList.remove('show'); }
-  else { src.src = REMUX_BASE + '?audio=' + v; src.type = 'video/mp4'; $('remux-notice').classList.add('show'); }
-  currentAudioTrack = v; $('play-error').classList.remove('show'); videoEl.load();
-  if (v === -1 && t > 0) videoEl.addEventListener('loadedmetadata', function f() {
-    videoEl.currentTime = t; if (was) videoEl.play(); videoEl.removeEventListener('loadedmetadata', f); });
-  else videoEl.addEventListener('canplay', function f() {
-    if (was) videoEl.play(); videoEl.removeEventListener('canplay', f); });
-}
-
 // ── Copy link ─────────────────────────────────────────────────────────────
 function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add('show');
-  clearTimeout(toast.id); toast.id = setTimeout(() => t.classList.remove('show'), 2200); }
+  clearTimeout(toast.id); toast.id = setTimeout(() => t.classList.remove('show'), 2400); }
+function fullUrl() { return (/^https?:\/\//.test(BASE_URL_JS) ? BASE_URL_JS : 'https://' + BASE_URL_JS) + ORIGINAL_SRC; }
 function copyLink(vlc) {
-  const url = BASE_URL_JS + ORIGINAL_SRC;
+  const url = fullUrl();
   (navigator.clipboard ? navigator.clipboard.writeText(url) : Promise.reject())
-    .then(() => toast(vlc ? 'Link copied — paste in VLC (Ctrl+N)' : 'Stream link copied'))
+    .then(() => toast(vlc ? 'Link copied. Paste it in the app' : 'Stream link copied'))
     .catch(() => { prompt('Copy this link:', url); });
 }
 
-// ── Server load ───────────────────────────────────────────────────────────
+// ── Server status ─────────────────────────────────────────────────────────
 const level = p => p >= 85 ? 'high' : p >= 60 ? 'mid' : '';
 function setMeter(id, p) {
   const bar = $(id + '-bar'); bar.style.width = Math.min(p, 100) + '%'; bar.className = level(p);
@@ -290,15 +211,15 @@ async function refreshLoad() {
     setMeter('cpu', d.cpu);
     if (d.mem != null) setMeter('mem', d.mem); else $('mem-val').textContent = 'n/a';
     $('streams-val').textContent = d.watching != null ? d.watching : d.streams;
-    const worst = Math.max(d.cpu, d.mem || 0), lv = level(worst);
-    const label = lv === 'high' ? 'Heavy' : lv === 'mid' ? 'Moderate' : 'Light';
-    $('load-tag').textContent = label; $('load-tag').className = 'load-tag ' + lv;
-    $('pill-text').textContent = 'Online · ' + label + ' load';
-  } catch (e) { $('load-tag').textContent = 'Unavailable'; $('pill-text').textContent = 'Offline'; }
+    const lv = level(Math.max(d.cpu, d.mem || 0));
+    $('load-tag').textContent = lv === 'high' ? 'Heavy' : lv === 'mid' ? 'Moderate' : 'Low';
+    $('load-tag').className = 'load-tag ' + lv;
+    $('pill').classList.remove('off'); $('pill-text').textContent = 'LIVE';
+  } catch (e) { $('load-tag').textContent = 'Unavailable'; $('pill').classList.add('off'); $('pill-text').textContent = 'OFFLINE'; }
 }
-
 refreshLoad();
 setInterval(refreshLoad, 5000);
 </script>
+<script src="/static/player.js?v=3"></script>
 </body>
 </html>
