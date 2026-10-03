@@ -66,8 +66,11 @@ async def _fetch_media(client, message_id: int):
     return msg, media
 
 
+# Main bot links look like /watch/{id}/{filename}?hash=XXXXXX
+# (filename is cosmetic; the plain /watch/{id} form also works)
 @app.get("/watch/{message_id}")
-async def watch_page(request: Request, message_id: int):
+@app.get("/watch/{message_id}/{filename:path}")
+async def watch_page(request: Request, message_id: int, filename: str | None = None):
     client = session_manager.get_client()
     msg, media = await _fetch_media(client, message_id)
 
@@ -88,8 +91,10 @@ async def watch_page(request: Request, message_id: int):
 
 
 @app.get("/dl/{message_id}")
+@app.get("/dl/{message_id}/{filename:path}")
 @app.get("/stream/{message_id}")
-async def stream_file(request: Request, message_id: int):
+@app.get("/stream/{message_id}/{filename:path}")
+async def stream_file(request: Request, message_id: int, filename: str | None = None):
     clients = session_manager.get_all_clients()
     client = clients[0]  # first client just to resolve the message/metadata
     msg, media = await _fetch_media(client, message_id)
