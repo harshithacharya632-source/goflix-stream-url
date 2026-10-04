@@ -8,7 +8,7 @@
 <script>try{var t=localStorage.getItem('goflix_theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);}catch(e){}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/player.css?v=6">
+<link rel="stylesheet" href="/static/player.css?v=7">
 <style>
 :root{--red:#e50914;--red2:#ff2d3a;--bg:#0a0a0d;--card:#14141a;--line:#24242d;--mute:#8d8d9a;--text:#fff;--text2:#cfcfd8;--chip:#1d1d25;--glow:rgba(229,9,20,.28);--bar:#22222b;--ok:#2ecc71;--warn:#f5a524}
 [data-theme=light]{--bg:#f3f3f7;--card:#fff;--line:#e0e0e8;--mute:#6a6a78;--text:#111114;--text2:#3a3a46;--chip:#eeeef3;--glow:rgba(229,9,20,.12);--bar:#e3e3eb}
@@ -280,7 +280,7 @@ function drawSpark() {
   $('spark-line').setAttribute('points', pts); $('spark-fill').setAttribute('points', '0,30 ' + pts + ' 120,30');
 }
 async function refreshLoad() {
-  if (document.hidden) return;
+  if (document.hidden || document.documentElement.classList.contains('fsmode')) return;
   try {
     const d = await (await fetch('/api/load', { cache: 'no-store' })).json();
     setMeter('cpu', d.cpu);
@@ -296,6 +296,6 @@ async function refreshLoad() {
 refreshLoad();
 setInterval(refreshLoad, 5000);
 </script>
-<script src="/static/player.js?v=6"></script>
+<script src="/static/player.js?v=7"></script>
 </body>
 </html>
