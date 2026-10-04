@@ -57,7 +57,7 @@ templates = Jinja2Templates(directory="app/templates")
 # Telegram lookups cost a round trip on EVERY request (the browser makes several
 # while buffering/seeking), so remember a message for a few minutes.
 _MSG_TTL = 300
-_msg_cache = {}  # message_id -> (expires_at, msg, media)
+_msg_cache = {}  # (client, message_id) -> (expires_at, msg, media)
 
 
 async def _fetch_media(client, message_id: int):
@@ -66,7 +66,8 @@ async def _fetch_media(client, message_id: int):
     Every route needs this, so it's centralized here instead of repeated
     four times like in the original short_code-based version.
     """
-    hit = _msg_cache.get(message_id)
+    key = (id(client), message_id)
+    hit = _msg_cache.get(key)
     if hit and hit[0] > time.time():
         return hit[1], hit[2]
 
@@ -87,7 +88,7 @@ async def _fetch_media(client, message_id: int):
 
     if len(_msg_cache) >= 512:  # keep memory bounded
         _msg_cache.pop(next(iter(_msg_cache)))
-    _msg_cache[message_id] = (time.time() + _MSG_TTL, msg, media)
+    _msg_cache[key] = (time.time() + _MSG_TTL, msg, media)
     return msg, media
 
 
@@ -121,13 +122,23 @@ async def watch_page(request: Request, message_id: int, filename: str | None = N
 @app.get("/stream/{message_id}/{filename:path}")
 async def stream_file(request: Request, message_id: int, filename: str | None = None):
     clients = session_manager.get_all_clients()
-    client = clients[0]  # first client just to resolve the message/metadata
-    msg, media = await _fetch_media(client, message_id)
+
+    # Every Telegram account needs its OWN handle for the file (file handles are
+    # per-account), so look the message up with each client. Cached for 5 minutes.
+    results = await asyncio.gather(*[_fetch_media(c, message_id) for c in clients], return_exceptions=True)
+    usable = [(c, r) for c, r in zip(clients, results) if not isinstance(r, Exception)]
+    if not usable:
+        raise results[0]
+    for c, r in zip(clients, results):
+        if isinstance(r, Exception):
+            logger.warning(f"A Telegram client can't see message {message_id}: {r}")
+
+    msg = usable[0][1][0]
     file_info = msg.file
 
     response = await get_streaming_response(
-        clients,  # ALL clients, for parallel downloading
-        file=media,
+        [c for c, _ in usable],            # all working clients, for parallel downloading
+        file=[r[1] for _, r in usable],    # the matching file handle for each client
         file_size=file_info.size,
         filename=file_info.name or f"file_{message_id}",
         mime_type=file_info.mime_type or "application/octet-stream",
@@ -197,6 +208,8 @@ async def server_load():
             "mem": _mem_percent(),
             "streams": _active_streams,
             "watching": _watching_now(),
+            "fast_crypto": bool(__import__("telethon.crypto.aes", fromlist=["aes"]).cryptg),
+            "connections": len(session_manager.get_all_clients()),
             "uptime": int(time.time() - _started_at),
         },
         headers={"Cache-Control": "no-store"},
