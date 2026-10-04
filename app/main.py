@@ -40,11 +40,17 @@ app = FastAPI(title="Goflix Stream URL", lifespan=lifespan)
 
 # Enable Compression
 class _GZipNotMedia(GZipMiddleware):
-    """Gzip pages/JSON only. Gzipping video wastes CPU, breaks Content-Length and stops downloads from resuming."""
+    """Gzip pages/JSON only. Gzipping video wastes CPU, breaks Content-Length (download size shows '?')
+    and stops downloads from resuming. Allow-list, so every media link shape (/stream, /dl, /download,
+    /{id}/{name}, /{hash}{id}, ...) is left alone."""
+    _GZIP_OK = ("/watch", "/api", "/static", "/admin")
+
     async def __call__(self, scope, receive, send):
-        if scope["type"] == "http" and scope["path"].startswith(("/stream", "/dl", "/remux")):
-            await self.app(scope, receive, send)
-            return
+        if scope["type"] == "http":
+            path = scope["path"]
+            if path != "/" and not path.startswith(self._GZIP_OK):
+                await self.app(scope, receive, send)
+                return
         await super().__call__(scope, receive, send)
 
 
