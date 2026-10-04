@@ -8,7 +8,7 @@
 <script>try{var t=localStorage.getItem('goflix_theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);}catch(e){}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/player.css?v=3">
+<link rel="stylesheet" href="/static/player.css?v=4">
 <style>
 :root{--red:#e50914;--red2:#ff2d3a;--bg:#0a0a0d;--card:#14141a;--line:#24242d;--mute:#8d8d9a;--text:#fff;--text2:#cfcfd8;--chip:#1d1d25;--glow:rgba(229,9,20,.28);--bar:#22222b;--ok:#2ecc71;--warn:#f5a524}
 [data-theme=light]{--bg:#f3f3f7;--card:#fff;--line:#e0e0e8;--mute:#6a6a78;--text:#111114;--text2:#3a3a46;--chip:#eeeef3;--glow:rgba(229,9,20,.12);--bar:#e3e3eb}
@@ -52,7 +52,11 @@ h1{font-size:clamp(1.15rem,4.4vw,1.8rem);font-weight:700;line-height:1.25;overfl
 .btn.primary{background:linear-gradient(135deg,var(--red),var(--red2));color:#fff;border-color:transparent;box-shadow:0 8px 22px rgba(229,9,20,.3)}
 .btn svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .apps{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
-.apps .btn{padding:13px 6px;font-size:.9rem}
+.apps .btn{padding:12px 6px;font-size:.9rem}
+.btn svg.ic{width:22px;height:22px;stroke:none;flex:none}
+.note{display:flex;gap:12px;align-items:flex-start}
+.note .hint{margin-top:4px}
+.big-ic{width:34px;height:34px;flex:none}
 .hint{margin-top:12px;font-size:.8rem;color:var(--mute);line-height:1.5}
 .hint b{color:var(--text2)}
 /* server load */
@@ -106,31 +110,43 @@ footer b{color:var(--red)}
   <div class="banner err" id="warn"><b id="warn-msg"></b>
     <button class="btn primary" style="width:100%;margin-top:10px" onclick="document.getElementById('vlc-link').click()">Open in VLC</button></div>
 
-  <!-- 2. OPEN IN APP -->
+  <!-- 2. FILE NAME + SIZE -->
+  <div class="title-block">
+    <h1 id="title" title="{{ file.filename }}">{{ file.filename }}</h1>
+    <div class="chips" id="chips"></div>
+    <div class="meta"><span id="meta-size"></span><span>{{ file.created_at.strftime('%d %b %Y') }}</span></div>
+  </div>
+
+  <!-- 3. PLAYER APPS -->
   <div class="card">
     <h2>Open in app</h2>
     <div class="apps">
-      <a class="btn" id="vlc-link" href="#">VLC</a>
-      <a class="btn" id="mx-link" href="#">MX Player</a>
-      <a class="btn" id="nplayer-link" href="#">nPlayer</a>
-      <a class="btn" id="playit-link" href="#">PLAYit</a>
+      <a class="btn" id="vlc-link" href="#"><svg class="ic" viewBox="0 0 24 24"><path d="M12 2l6.2 15H5.8z" fill="#f78c00"/><path d="M3 22l2.2-5h13.6l2.2 5z" fill="#f78c00"/><path d="M9.6 9h4.8l.9 2.2H8.7zM7.7 13.6h8.6l.9 2.2H6.8z" fill="#fff"/></svg>VLC</a>
+      <a class="btn" id="mx-link" href="#"><svg class="ic" viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="20" rx="6" fill="#2f7cf6"/><path d="M9.5 7l7 5-7 5z" fill="#fff"/></svg>MX Player</a>
+      <a class="btn" id="nplayer-link" href="#"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="#7b4dff"/><path d="M9.5 7.5l7 4.5-7 4.5z" fill="#fff"/></svg>nPlayer</a>
+      <a class="btn" id="playit-link" href="#"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="#14b87a"/><path d="M9.5 7.5l7 4.5-7 4.5z" fill="#fff"/></svg>PLAYit</a>
     </div>
-    <p class="hint"><b>Laptop:</b> tap Copy link, open VLC, press <b>Ctrl+N</b> (Mac: <b>⌘N</b>) → paste → Play.</p>
   </div>
 
-  <!-- 3. DOWNLOAD + COPY -->
+  <!-- 4. DOWNLOAD + COPY -->
   <div class="actions">
     <a class="btn primary" href="/stream/{{ message_id }}" download>
       <svg viewBox="0 0 24 24"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 21h16"/></svg>Download</a>
     <button class="btn" type="button" onclick="copyLink()">
       <svg viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 012-2h10"/></svg>Copy link</button>
   </div>
+  <p class="hint" style="margin-top:8px">Download slow? Use a download app like <b>ADM</b>, <b>1DM</b> or <b>IDM</b>. They open many connections at once.</p>
 
-  <!-- 4. TITLE / INFO -->
-  <div class="title-block">
-    <h1 id="title" title="{{ file.filename }}">{{ file.filename }}</h1>
-    <div class="chips" id="chips"></div>
-    <div class="meta"><span id="meta-size"></span><span>{{ file.created_at.strftime('%d %b %Y') }}</span></div>
+  <!-- 5. LAPTOP VLC -->
+  <button class="btn" type="button" style="width:100%;margin-top:12px" onclick="copyLink(true)">
+    <svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg>Copy link for VLC (laptop)</button>
+  <p class="hint"><b>Laptop:</b> copy the link, open VLC, press <b>Ctrl+N</b> (Mac: <b>⌘N</b>) → paste → Play.</p>
+
+  <!-- 6. MULTI AUDIO NOTE -->
+  <div class="card note">
+    <svg class="ic big-ic" viewBox="0 0 24 24"><path d="M12 2l6.2 15H5.8z" fill="#f78c00"/><path d="M3 22l2.2-5h13.6l2.2 5z" fill="#f78c00"/><path d="M9.6 9h4.8l.9 2.2H8.7zM7.7 13.6h8.6l.9 2.2H6.8z" fill="#fff"/></svg>
+    <div><b>More than one audio language?</b>
+      <p class="hint" style="margin-top:4px">This web player can't switch audio tracks. Open the video in <b>VLC</b>, it supports multi audio, and you can switch the language there.</p></div>
   </div>
 
   <div class="card">
@@ -194,7 +210,7 @@ function fullUrl() { return (/^https?:\/\//.test(BASE_URL_JS) ? BASE_URL_JS : 'h
 function copyLink(vlc) {
   const url = fullUrl();
   (navigator.clipboard ? navigator.clipboard.writeText(url) : Promise.reject())
-    .then(() => toast(vlc ? 'Link copied. Paste it in the app' : 'Stream link copied'))
+    .then(() => toast(vlc ? 'Link copied. In VLC press Ctrl+N and paste' : 'Stream link copied'))
     .catch(() => { prompt('Copy this link:', url); });
 }
 
@@ -220,6 +236,6 @@ async function refreshLoad() {
 refreshLoad();
 setInterval(refreshLoad, 5000);
 </script>
-<script src="/static/player.js?v=3"></script>
+<script src="/static/player.js?v=4"></script>
 </body>
 </html>
