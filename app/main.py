@@ -1,3 +1,4 @@
+import re
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -278,6 +279,33 @@ async def remux_file(request: Request, message_id: int, audio: int = 0):
     except Exception as e:
         logger.error(f"Remux error: {e}")
         raise HTTPException(status_code=500, detail="Error starting remux stream")
+
+
+# ─── Download links from the Telegram bot ────────────────────────────────────
+# The bot's DOWNLOAD button doesn't use /dl/..., so it hit "Not Found". These
+# aliases accept the common link shapes and all start a real file download
+# (Content-Disposition: attachment, because the path doesn't start with /stream):
+#   /{id}/{filename}?hash=XXXXXX    /{id}
+#   /{hash6}{id}                    /{hash6}{id}/{filename}
+#   /download/{id}[/{filename}]     /d/{id}[/{filename}]
+# They are registered last so every existing route keeps priority.
+@app.get("/download/{message_id}")
+@app.get("/download/{message_id}/{filename:path}")
+@app.get("/d/{message_id}")
+@app.get("/d/{message_id}/{filename:path}")
+@app.get("/{message_id:int}")
+@app.get("/{message_id:int}/{filename:path}")
+async def download_alias(request: Request, message_id: int, filename: str | None = None):
+    return await stream_file(request, message_id, filename)
+
+
+@app.get("/{hashid}")
+@app.get("/{hashid}/{filename:path}")
+async def download_hash_alias(request: Request, hashid: str, filename: str | None = None):
+    m = re.fullmatch(r"[A-Za-z0-9_-]{6}(\d+)", hashid)
+    if not m:
+        raise HTTPException(status_code=404, detail="Not Found")
+    return await stream_file(request, int(m.group(1)), filename)
 
 
 if __name__ == "__main__":
