@@ -30,3 +30,17 @@
 .skip.show{opacity:1}
 #warn .btn{margin-top:10px;width:100%}
 .btn.glow{border-color:var(--red2);box-shadow:0 0 0 3px rgba(229,9,20,.45)}
+
+/* v5: white controls like the GOFLIX screenshot; big play button always tappable */
+.ctl{pointer-events:none}
+.ctl>*{pointer-events:auto}
+.pb.hide .ctl>*{pointer-events:none}
+.pb .big{width:62px;height:62px;background:rgba(0,0,0,.55);border:2px solid rgba(255,255,255,.85);z-index:7}
+.pb .big svg{width:28px;height:28px;margin-left:3px}
+.seek::before{background:rgba(255,255,255,.28)}
+.seek .buf{background:rgba(255,255,255,.4)}
+.seek .fill{background:#fff}
+.seek b{background:var(--red2);box-shadow:0 0 0 3px rgba(229,9,20,.35)}
+#vol{accent-color:#fff}
+.hud u i{background:#fff}
+.pb .buffering i{border-top-color:#fff}
