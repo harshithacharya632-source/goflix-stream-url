@@ -1,6 +1,7 @@
 import math
 from telethon import TelegramClient
 from telethon.tl.types import Document, Photo
+from telethon.errors import FloodWaitError
 from fastapi import Request, HTTPException
 from fastapi.responses import StreamingResponse, Response
 import logging
@@ -60,6 +61,22 @@ async def ultra_high_speed_streamer(clients: list, file, start: int, end: int, c
                 if len(buf) >= need:
                     return bytes(buf)
                 last_err = IOError(f"short chunk at {pos}: {len(buf)}/{need}")
+            except FloodWaitError as ex:
+                # Telegram is rate-limiting this account -- almost always from
+                # firing PER_CLIENT concurrent requests on a single connection
+                # right after a seek. Previously this fell into the generic
+                # except below and only waited ~0.3-1.2s total before giving
+                # up, which is far shorter than a real FloodWait, so it kept
+                # re-hitting the limit in a tight loop until it happened to
+                # clear on its own -- that's what made a seek feel like it
+                # took up to a minute to recover. Wait the actual time
+                # Telegram asks for instead (capped so one slow chunk can't
+                # hang the whole stream indefinitely).
+                last_err = ex
+                wait_for = min(ex.seconds, 30)
+                logger.warning(f"FloodWait {ex.seconds}s on client {ci} at offset {pos} -- waiting {wait_for}s.")
+                await asyncio.sleep(wait_for)
+                continue
             except Exception as ex:  # CancelledError is not an Exception, so it passes through
                 last_err = ex
             await asyncio.sleep(0.3 * (attempt + 1))
