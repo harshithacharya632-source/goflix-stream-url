@@ -27,7 +27,8 @@ let hideT;
 // instantly hides, so the timer is the only thing that ever hides them.
 const showCtl = () => { pb.classList.remove('hide'); clearTimeout(hideT);
   if (!v.paused) hideT = setTimeout(() => pb.classList.add('hide'), 4500); };
-const toggleCtl = () => showCtl();
+const hideNow = () => { clearTimeout(hideT); pb.classList.add('hide'); };
+const toggleCtl = () => (pb.classList.contains('hide') || v.paused) ? showCtl() : hideNow();
 const toggle = () => v.paused ? v.play().catch(() => {}) : v.pause();
 $('pp').onclick = $('big').onclick = e => { e.stopPropagation(); toggle(); showCtl(); };
 v.addEventListener('play', () => { pb.classList.add('playing'); $('pp').innerHTML = IC.pause; showCtl(); });
@@ -122,7 +123,7 @@ pb.addEventListener('touchend', () => {
 });
 pb.addEventListener('click', e => { if (Date.now() - lastTouch < 600 || e.target.closest('.ctl,.big')) return; toggle(); showCtl(); });
 pb.addEventListener('dblclick', e => { if (!e.target.closest('.ctl')) $('fsb').click(); });
-pb.addEventListener('mousemove', showCtl);
+pb.addEventListener('mousemove', () => { if (Date.now() - lastTouch > 800) showCtl(); });
 addEventListener('keydown', e => { if (/INPUT|TEXTAREA/.test(e.target.tagName)) return;
   if (e.code === 'Space') { e.preventDefault(); toggle(); } else if (e.key === 'f') $('fsb').click();
   else if (e.key === 'ArrowRight') skip(10, 'R'); else if (e.key === 'ArrowLeft') skip(-10, 'L'); else if (e.key === 'Escape' && isFS()) exitFS(); });
@@ -158,15 +159,19 @@ v.addEventListener('playing', () => { clearWarn();
     else if (m === false) clearWarn(); }, ms)); });
 
 // ── resume playback ─────────────────────────────────────────────────────
-const RK = 'goflix_resume_' + SHORT_CODE; let lastSave = 0;
-const getSaved = () => { try { return parseFloat(localStorage.getItem(RK)) || 0; } catch (e) { return 0; } };
+const fkey = (() => { let h = 5381; const s = FILENAME + '|' + FILE_SIZE;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0; return h.toString(36); })();
+const RK = 'goflix_pos_' + fkey, OLD_RK = 'goflix_resume_' + SHORT_CODE; let lastSave = 0;
+const getSaved = () => { try { return parseFloat(localStorage.getItem(RK) || localStorage.getItem(OLD_RK)) || 0; } catch (e) { return 0; } };
+const saveNow = () => { if (v.currentTime > 5) { try { localStorage.setItem(RK, String(Math.floor(v.currentTime))); } catch (e) {} } };
+addEventListener('pagehide', saveNow); document.addEventListener('visibilitychange', () => { if (document.hidden) saveNow(); });
 v.addEventListener('loadedmetadata', () => { const s = getSaved();
   if (s > 5 && v.duration && s < v.duration - 5) { v.currentTime = s; toast('Resumed from ' + fmt(s)); } }, { once: true });
 v.addEventListener('timeupdate', () => { if (v.currentTime - lastSave >= 5) { lastSave = v.currentTime; try { localStorage.setItem(RK, String(Math.floor(lastSave))); } catch (e) {} } });
 v.addEventListener('ended', () => { try { localStorage.removeItem(RK); } catch (e) {} savePct(100); });
 
 // ── watched percentage ──────────────────────────────────────────────────
-const PK = 'goflix_pct_' + SHORT_CODE; let lastPct = -1;
+const PK = 'goflix_pct_' + fkey; let lastPct = -1;
 function savePct(p) { p = clamp(p, 0, 100); $('wpct').textContent = p;
   if (p !== lastPct) { lastPct = p; try { localStorage.setItem(PK, String(p)); } catch (e) {} } }
 try { $('wpct').textContent = parseInt(localStorage.getItem(PK)) || 0; } catch (e) {}
