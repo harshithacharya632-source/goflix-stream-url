@@ -7,6 +7,7 @@ const IC = {
   pause: '<svg viewBox="0 0 24 24"><path d="M6 4h4v16H6zM14 4h4v16h-4z"/></svg>',
   vol: '<svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 4V5L7 9zM16 8a5 5 0 010 8M18.5 5.5a9 9 0 010 13" stroke="#fff" stroke-width="2" fill="none"/></svg>',
   mute: '<svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 4V5L7 9z"/><path d="M16 9l5 6M21 9l-5 6" stroke="#fff" stroke-width="2"/></svg>',
+  pip: '<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2" stroke="#fff" stroke-width="2" fill="none"/><rect x="12" y="11" width="7" height="6" rx="1"/></svg>',
   fs: '<svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" stroke="#fff" stroke-width="2.2" fill="none"/></svg>',
 };
 const fmt = s => { s = Math.max(0, Math.floor(s || 0)); const h = s / 3600 | 0, m = s % 3600 / 60 | 0, x = s % 60;
@@ -14,7 +15,7 @@ const fmt = s => { s = Math.max(0, Math.floor(s || 0)); const h = s / 3600 | 0, 
 const clamp = (n, a, b) => Math.min(b, Math.max(a, n));
 const isFS = () => pb.classList.contains('fs');
 const rotated = () => pb.classList.contains('rot');
-$('pp').innerHTML = IC.play; $('big').innerHTML = IC.play; $('fsb').innerHTML = IC.fs; $('mute').innerHTML = IC.vol;
+$('pp').innerHTML = IC.play; $('big').innerHTML = IC.play; $('fsb').innerHTML = IC.fs; $('mute').innerHTML = IC.vol; $('pipb').innerHTML = IC.pip;
 
 // ── play / pause / UI ────────────────────────────────────────────────────
 let hideT;
@@ -54,8 +55,16 @@ const syncVol = () => { $('mute').innerHTML = (v.muted || v.volume === 0) ? IC.m
 $('mute').onclick = () => { v.muted = !v.muted; syncVol(); };
 $('vol').oninput = e => { v.muted = false; v.volume = +e.target.value; syncVol(); };
 v.addEventListener('volumechange', syncVol); syncVol();
-const SPEEDS = [1, 1.25, 1.5, 2, 0.75]; let si = 0;
-$('spd').onclick = () => { si = (si + 1) % SPEEDS.length; v.playbackRate = SPEEDS[si]; $('spd').textContent = SPEEDS[si] + 'x'; };
+async function pip() {
+  try {
+    if (document.pictureInPictureElement) await document.exitPictureInPicture();
+    else if (document.pictureInPictureEnabled && v.requestPictureInPicture) await v.requestPictureInPicture();
+    else if (v.webkitSetPresentationMode) v.webkitSetPresentationMode(v.webkitPresentationMode === 'picture-in-picture' ? 'inline' : 'picture-in-picture');
+    else toast("Picture in picture isn't supported in this browser");
+  } catch (e) { toast('Press play first, then try PiP again'); }
+}
+$('pipb').onclick = pip;
+$('pip-link').addEventListener('click', e => { e.preventDefault(); pip(); });
 
 // ── fullscreen: rotate to landscape ─────────────────────────────────────
 function fixRot() { pb.classList.toggle('rot', isFS() && innerHeight > innerWidth); }
@@ -135,7 +144,7 @@ function hideBuf() { clearTimeout(bufT); sp.classList.remove('show'); }
 const warn = $('warn');
 function warnVlc(msg) { $('warn-msg').textContent = msg; warn.classList.add('show'); $('vlc-link').classList.add('glow'); }
 function clearWarn() { warn.classList.remove('show'); $('vlc-link').classList.remove('glow'); }
-v.addEventListener('error', () => warnVlc("This web player can't play this video format."));
+v.addEventListener('error', () => warnVlc("This web player can't play this video format. VLC usually plays it fine."));
 function audioMissing() {
   if (v.muted || v.volume === 0 || v.paused || v.currentTime < 2) return null;
   if ('webkitAudioDecodedByteCount' in v) return v.webkitAudioDecodedByteCount === 0;
@@ -145,7 +154,7 @@ function audioMissing() {
 }
 v.addEventListener('playing', () => { clearWarn();
   [3000, 7000].forEach(ms => setTimeout(() => { const m = audioMissing();
-    if (m === true) warnVlc("This web player can't play this file's audio (no sound). Tap VLC below, VLC can play it.");
+    if (m === true) warnVlc("No audio track detected in this player. VLC usually plays it fine.");
     else if (m === false) clearWarn(); }, ms)); });
 
 // ── resume playback ─────────────────────────────────────────────────────
@@ -154,7 +163,14 @@ const getSaved = () => { try { return parseFloat(localStorage.getItem(RK)) || 0;
 v.addEventListener('loadedmetadata', () => { const s = getSaved();
   if (s > 5 && v.duration && s < v.duration - 5) { v.currentTime = s; toast('Resumed from ' + fmt(s)); } }, { once: true });
 v.addEventListener('timeupdate', () => { if (v.currentTime - lastSave >= 5) { lastSave = v.currentTime; try { localStorage.setItem(RK, String(Math.floor(lastSave))); } catch (e) {} } });
-v.addEventListener('ended', () => { try { localStorage.removeItem(RK); } catch (e) {} });
+v.addEventListener('ended', () => { try { localStorage.removeItem(RK); } catch (e) {} savePct(100); });
+
+// ── watched percentage ──────────────────────────────────────────────────
+const PK = 'goflix_pct_' + SHORT_CODE; let lastPct = -1;
+function savePct(p) { p = clamp(p, 0, 100); $('wpct').textContent = p;
+  if (p !== lastPct) { lastPct = p; try { localStorage.setItem(PK, String(p)); } catch (e) {} } }
+try { $('wpct').textContent = parseInt(localStorage.getItem(PK)) || 0; } catch (e) {}
+v.addEventListener('timeupdate', () => { if (v.duration) savePct(Math.floor(v.currentTime / v.duration * 100)); });
 
 // ── Stream in Apps (proper Android intents / iOS schemes) ───────────────
 const UA = navigator.userAgent, ANDROID = /Android/i.test(UA), IOS = /iP(hone|ad|od)/.test(UA);
@@ -175,7 +191,6 @@ function intent(pkg) { const u = new URL(abs());
 const APPS = {
   'vlc-link': { pkg: 'org.videolan.vlc', ios: () => 'vlc-x-callback://x-callback-url/stream?url=' + encodeURIComponent(abs()) },
   'mx-link': { pkg: 'com.mxtech.videoplayer.ad' },
-  'nplayer-link': { pkg: 'com.newin.nplayer.pro', ios: () => abs().replace(/^http/, 'nplayer-http') },
   'playit-link': { pkg: 'com.playit.videoplayer' },
 };
 Object.entries(APPS).forEach(([id, a]) => $(id).addEventListener('click', e => { e.preventDefault(); v.pause();
