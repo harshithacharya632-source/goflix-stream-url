@@ -213,7 +213,7 @@ async def get_streaming_response(clients: list[TelegramClient], file, file_size:
         "Content-Length": str(end - start + 1),
         "Content-Type": mime_type,
         "Content-Disposition": _content_disposition(filename, inline),
-        "Cache-Control": "public, max-age=31536000",
+        "Cache-Control": "public, max-age=31536000, no-transform",  # no-transform: proxies must not re-compress the file
         "Access-Control-Allow-Origin": "*",
         "X-Accel-Buffering": "no",  # tell proxies (nginx) not to hold the stream back
     }
