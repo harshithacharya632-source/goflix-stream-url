@@ -208,7 +208,12 @@ function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add
   clearTimeout(toast.id); toast.id = setTimeout(() => t.classList.remove('show'), 2400); }
 function fullUrl() { return (/^https?:\/\//.test(BASE_URL_JS) ? BASE_URL_JS : 'https://' + BASE_URL_JS) + ORIGINAL_SRC; }
 function copyLink(vlc) {
-  const url = fullUrl();
+  // For "Copy link for VLC" specifically, append the current playback
+  // position as a #t=<seconds> media-fragment -- desktop VLC reads this
+  // to start mid-file instead of from 0, so resuming on a laptop lines up
+  // with where you left off in the web player.
+  const t = Math.floor(($('player') || {}).currentTime || 0);
+  const url = fullUrl() + (vlc && t > 1 ? '#t=' + t : '');
   (navigator.clipboard ? navigator.clipboard.writeText(url) : Promise.reject())
     .then(() => toast(vlc ? 'Link copied. In VLC press Ctrl+N and paste' : 'Stream link copied'))
     .catch(() => { prompt('Copy this link:', url); });
