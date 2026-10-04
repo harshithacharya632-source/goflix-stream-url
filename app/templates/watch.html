@@ -8,7 +8,7 @@
 <script>try{var t=localStorage.getItem('goflix_theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);}catch(e){}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/player.css?v=4">
+<link rel="stylesheet" href="/static/player.css?v=5">
 <style>
 :root{--red:#e50914;--red2:#ff2d3a;--bg:#0a0a0d;--card:#14141a;--line:#24242d;--mute:#8d8d9a;--text:#fff;--text2:#cfcfd8;--chip:#1d1d25;--glow:rgba(229,9,20,.28);--bar:#22222b;--ok:#2ecc71;--warn:#f5a524}
 [data-theme=light]{--bg:#f3f3f7;--card:#fff;--line:#e0e0e8;--mute:#6a6a78;--text:#111114;--text2:#3a3a46;--chip:#eeeef3;--glow:rgba(229,9,20,.12);--bar:#e3e3eb}
@@ -77,6 +77,25 @@ footer b{color:var(--red)}
 .toast{position:fixed;left:50%;bottom:calc(22px + env(safe-area-inset-bottom));transform:translate(-50%,30px);opacity:0;background:#fff;color:#111;font-weight:600;font-size:.88rem;padding:11px 18px;border-radius:99px;transition:.25s;pointer-events:none;z-index:2000;box-shadow:0 6px 24px rgba(0,0,0,.35)}
 .toast.show{transform:translate(-50%,0);opacity:1}
 @media(min-width:700px){.wrap{padding:0 24px}}
+.lbl{display:flex;align-items:center;gap:8px;font-size:.76rem;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--mute);margin:22px 0 12px}
+.lbl::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--ok)}
+h1{font-size:clamp(1.05rem,4.6vw,1.5rem);font-weight:500}
+.meta{align-items:center;gap:10px 14px}
+.sz{display:flex;align-items:center;gap:8px}
+.sz svg{width:18px;height:18px;fill:none;stroke:var(--mute);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.wpill{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:99px;background:var(--chip);border:1px solid var(--line);color:var(--text);font-size:.82rem;font-weight:600}
+.wpill svg{width:15px;height:15px;fill:none;stroke:var(--ok);stroke-width:2.2}
+.banner.warn{align-items:center;gap:12px;margin-top:16px;background:rgba(245,165,36,.1);border:1px solid rgba(245,165,36,.55);color:#f6c36b}
+.banner.warn.show{display:flex}
+.banner.warn>svg{width:24px;height:24px;flex:none;fill:var(--warn)}
+.banner.warn>span{flex:1}
+.vlcbtn{flex:none;border:0;border-radius:9px;background:#ff8a00;color:#fff;font:700 .9rem 'Outfit',sans-serif;padding:10px 14px;cursor:pointer}
+.apps .btn{flex-direction:column;gap:8px;padding:16px 6px;font-size:.88rem}
+.apps .btn svg.ic{width:28px;height:28px}
+.btn.vlcpc{width:100%;margin-top:12px;color:#5db8ff;background:rgba(40,110,200,.14);border-color:rgba(70,150,255,.45)}
+.info{display:grid;gap:10px;font-size:.88rem}
+.info div{display:flex;justify-content:space-between;gap:14px;color:var(--text2)}
+.info b{color:var(--text);text-align:right;overflow-wrap:anywhere}
 </style>
 </head>
 <body>
@@ -90,7 +109,7 @@ footer b{color:var(--red)}
   </header>
 
   <!-- 1. PLAYER -->
-  <div class="pb hide" id="pb">
+  <div class="pb" id="pb">
     <video id="player" playsinline webkit-playsinline preload="auto" src="/stream/{{ message_id }}"></video>
     <div class="buffering" id="buffering"><i></i><span>Loading stream…</span></div>
     <div class="hud" id="hud"></div>
@@ -101,52 +120,59 @@ footer b{color:var(--red)}
       <div class="crow">
         <button id="pp" aria-label="Play/Pause"></button><span class="tm" id="tm">0:00 / 0:00</span><span class="sp"></span>
         <button id="mute" aria-label="Mute"></button><input type="range" id="vol" min="0" max="1" step="0.05" value="1">
-        <button id="spd" aria-label="Speed">1x</button><button id="fsb" aria-label="Fullscreen"></button>
+        <button id="pipb" aria-label="Picture in picture"></button><button id="fsb" aria-label="Fullscreen"></button>
       </div>
     </div>
   </div>
 
-  <!-- shown when the browser can't play the video or has no audio -->
-  <div class="banner err" id="warn"><b id="warn-msg"></b>
-    <button class="btn primary" style="width:100%;margin-top:10px" onclick="document.getElementById('vlc-link').click()">Open in VLC</button></div>
-
-  <!-- 2. FILE NAME + SIZE -->
+  <!-- 2. FILE NAME + SIZE + WATCHED -->
   <div class="title-block">
     <h1 id="title" title="{{ file.filename }}">{{ file.filename }}</h1>
-    <div class="chips" id="chips"></div>
-    <div class="meta"><span id="meta-size"></span><span>{{ file.created_at.strftime('%d %b %Y') }}</span></div>
-  </div>
-
-  <!-- 3. PLAYER APPS -->
-  <div class="card">
-    <h2>Open in app</h2>
-    <div class="apps">
-      <a class="btn" id="vlc-link" href="#"><svg class="ic" viewBox="0 0 24 24"><path d="M12 2l6.2 15H5.8z" fill="#f78c00"/><path d="M3 22l2.2-5h13.6l2.2 5z" fill="#f78c00"/><path d="M9.6 9h4.8l.9 2.2H8.7zM7.7 13.6h8.6l.9 2.2H6.8z" fill="#fff"/></svg>VLC</a>
-      <a class="btn" id="mx-link" href="#"><svg class="ic" viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="20" rx="6" fill="#2f7cf6"/><path d="M9.5 7l7 5-7 5z" fill="#fff"/></svg>MX Player</a>
-      <a class="btn" id="nplayer-link" href="#"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="#7b4dff"/><path d="M9.5 7.5l7 4.5-7 4.5z" fill="#fff"/></svg>nPlayer</a>
-      <a class="btn" id="playit-link" href="#"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="#14b87a"/><path d="M9.5 7.5l7 4.5-7 4.5z" fill="#fff"/></svg>PLAYit</a>
+    <div class="meta">
+      <span class="sz"><svg viewBox="0 0 24 24"><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M5 13l2-8h10l2 8M7 16.5h.01"/></svg><span id="meta-size"></span></span>
+      <span class="wpill" id="wpill"><svg viewBox="0 0 24 24"><path d="M1.5 12S5.5 5 12 5s10.5 7 10.5 7-4 7-10.5 7S1.5 12 1.5 12z"/><circle cx="12" cy="12" r="3"/></svg><span><b id="wpct">0</b>% watched</span></span>
     </div>
   </div>
 
-  <!-- 4. DOWNLOAD + COPY -->
+  <!-- shown when the browser can't play the video or has no audio -->
+  <div class="banner warn" id="warn">
+    <svg viewBox="0 0 24 24"><path d="M12 2.5L1.5 21h21zM11 9h2v6h-2zm0 7.5h2v2h-2z"/></svg>
+    <span id="warn-msg"></span>
+    <button class="vlcbtn" type="button" onclick="document.getElementById('vlc-link').click()">Open VLC</button>
+  </div>
+
+  <!-- 3. PLAYER APPS -->
+  <div class="lbl">Open in app</div>
+  <div class="apps">
+    <a class="btn" id="mx-link" href="#"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9.5" fill="none" stroke="#ff7a1a" stroke-width="2"/><path d="M10 7.8l6 4.2-6 4.2z" fill="#ff7a1a"/></svg>MX Player</a>
+    <a class="btn" id="vlc-link" href="#"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9.5" fill="none" stroke="#ff7a1a" stroke-width="2"/><path d="M10 7.8l6 4.2-6 4.2z" fill="#ff7a1a"/></svg>VLC</a>
+    <a class="btn" id="playit-link" href="#"><svg class="ic" viewBox="0 0 24 24"><rect x="2.5" y="4" width="19" height="13" rx="2" fill="none" stroke="#18b9e8" stroke-width="2"/><path d="M8 21h8M12 17v4" stroke="#18b9e8" stroke-width="2" stroke-linecap="round"/></svg>Play it</a>
+    <a class="btn" id="pip-link" href="#"><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="3" width="13" height="10" rx="2" fill="#b565d9"/><rect x="9" y="9" width="12" height="11" rx="2" fill="#d58cf0" stroke="#14141a" stroke-width="1.5"/></svg>PiP Mode</a>
+  </div>
+
+  <!-- 4. DOWNLOAD + SHARE -->
   <div class="actions">
     <a class="btn primary" href="/stream/{{ message_id }}" download>
       <svg viewBox="0 0 24 24"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 21h16"/></svg>Download</a>
-    <button class="btn" type="button" onclick="copyLink()">
-      <svg viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 012-2h10"/></svg>Copy link</button>
+    <button class="btn" type="button" onclick="shareLink()">
+      <svg viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 10.5l6.8-4M8.6 13.5l6.8 4"/></svg>Share</button>
   </div>
-  <p class="hint" style="margin-top:8px">Download slow? Use a download app like <b>ADM</b>, <b>1DM</b> or <b>IDM</b>. They open many connections at once.</p>
 
-  <!-- 5. LAPTOP VLC -->
-  <button class="btn" type="button" style="width:100%;margin-top:12px" onclick="copyLink(true)">
-    <svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg>Copy link for VLC (laptop)</button>
-  <p class="hint"><b>Laptop:</b> copy the link, open VLC, press <b>Ctrl+N</b> (Mac: <b>⌘N</b>) → paste → Play.</p>
+  <!-- 5. COPY VLC LINK (PC / LAPTOP) -->
+  <button class="btn vlcpc" type="button" onclick="copyLink(true)">
+    <svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg>Copy VLC Link (for PC/Laptop)</button>
 
-  <!-- 6. MULTI AUDIO NOTE -->
-  <div class="card note">
-    <svg class="ic big-ic" viewBox="0 0 24 24"><path d="M12 2l6.2 15H5.8z" fill="#f78c00"/><path d="M3 22l2.2-5h13.6l2.2 5z" fill="#f78c00"/><path d="M9.6 9h4.8l.9 2.2H8.7zM7.7 13.6h8.6l.9 2.2H6.8z" fill="#fff"/></svg>
-    <div><b>More than one audio language?</b>
-      <p class="hint" style="margin-top:4px">This web player can't switch audio tracks. Open the video in <b>VLC</b>, it supports multi audio, and you can switch the language there.</p></div>
+  <!-- 6. FILE INFO -->
+  <div class="lbl">File info</div>
+  <div class="card" style="margin-top:0">
+    <div class="info">
+      <div><span>Size</span><b id="info-size"></b></div>
+      <div><span>Added</span><b>{{ file.created_at.strftime('%d %b %Y') }}</b></div>
+      <div><span>Format</span><b id="info-fmt"></b></div>
+    </div>
+    <p class="hint">Laptop: tap <b>Copy VLC Link</b>, open VLC, press <b>Ctrl+N</b> (Mac: <b>⌘N</b>), paste, then Play.</p>
+    <p class="hint">Download slow? Use a download app like <b>ADM</b>, <b>1DM</b> or <b>IDM</b>.</p>
+    <p class="hint">More than one audio language? This web player can't switch tracks. Open the video in <b>VLC</b> and switch there.</p>
   </div>
 
   <div class="card">
@@ -183,24 +209,12 @@ applyTheme(document.documentElement.getAttribute('data-theme') || 'dark');
 $('theme-btn').onclick = () => { const t = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
   applyTheme(t); try { localStorage.setItem('goflix_theme', t); } catch (e) {} };
 
-// ── Title, chips, size ────────────────────────────────────────────────────
+// ── Size + format ─────────────────────────────────────────────────────────
 (function(){
-  const ext = (FILENAME.match(/\.([a-z0-9]{2,4})$/i) || [,''])[1].toUpperCase();
-  const base = FILENAME.replace(/\.[a-z0-9]{2,4}$/i, '');
-  $('title').textContent = base.replace(/[._]+/g, ' ').replace(/\s+/g, ' ').trim() || FILENAME;
-  const find = re => (base.match(re) || [])[0];
-  const tags = [
-    [find(/\b(2160p|1440p|1080p|720p|576p|480p)\b/i), true],
-    [find(/\b(BluRay|BRRip|WEB[-. ]?DL|WEBRip|HDRip|HDTV|DVDRip|HDCAM|CAM)\b/i)],
-    [find(/\b(x264|x265|H[. ]?264|H[. ]?265|HEVC|AV1)\b/i)],
-    [find(/\b(10bit|HDR10?|DV|Atmos|DDP?5[. ]1|AAC|DTS)\b/i)],
-    [ext],
-  ];
-  tags.forEach(([t, hot]) => { if (!t) return;
-    const s = document.createElement('span'); s.className = 'chip' + (hot ? ' hot' : '');
-    s.textContent = t.toUpperCase(); $('chips').appendChild(s); });
   const gb = FILE_SIZE / 1073741824;
-  $('meta-size').textContent = gb >= 1 ? gb.toFixed(2) + ' GB' : (FILE_SIZE / 1048576).toFixed(0) + ' MB';
+  const size = gb >= 1 ? gb.toFixed(2) + ' GB' : (FILE_SIZE / 1048576).toFixed(0) + ' MB';
+  $('meta-size').textContent = size; $('info-size').textContent = size;
+  $('info-fmt').textContent = ((FILENAME.match(/\.([a-z0-9]{2,4})$/i) || [,'video'])[1]).toUpperCase();
 })();
 
 // ── Copy link ─────────────────────────────────────────────────────────────
@@ -217,6 +231,12 @@ function copyLink(vlc) {
   (navigator.clipboard ? navigator.clipboard.writeText(url) : Promise.reject())
     .then(() => toast(vlc ? 'Link copied. In VLC press Ctrl+N and paste' : 'Stream link copied'))
     .catch(() => { prompt('Copy this link:', url); });
+}
+
+function shareLink() {
+  const u = location.href.split('#')[0];
+  if (navigator.share) navigator.share({ title: FILENAME, url: u }).catch(() => {});
+  else (navigator.clipboard ? navigator.clipboard.writeText(u) : Promise.reject()).then(() => toast('Link copied')).catch(() => prompt('Copy this link:', u));
 }
 
 // ── Server status ─────────────────────────────────────────────────────────
@@ -241,6 +261,6 @@ async function refreshLoad() {
 refreshLoad();
 setInterval(refreshLoad, 5000);
 </script>
-<script src="/static/player.js?v=4"></script>
+<script src="/static/player.js?v=5"></script>
 </body>
 </html>
