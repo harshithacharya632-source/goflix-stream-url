@@ -18,9 +18,15 @@ $('pp').innerHTML = IC.play; $('big').innerHTML = IC.play; $('fsb').innerHTML = 
 
 // ── play / pause / UI ────────────────────────────────────────────────────
 let hideT;
+// Controls stay up for a full 4.5s after any interaction. Previously a
+// single tap, while controls were already visible, instantly force-hid
+// them (toggleCtl's old ternary) -- so a slightly mis-aimed tap while
+// reaching for fullscreen/volume/skip would make everything vanish right
+// as you tried to hit it. Tapping now only ever shows/extends, never
+// instantly hides, so the timer is the only thing that ever hides them.
 const showCtl = () => { pb.classList.remove('hide'); clearTimeout(hideT);
-  if (!v.paused) hideT = setTimeout(() => pb.classList.add('hide'), 3000); };
-const toggleCtl = () => pb.classList.contains('hide') ? showCtl() : (v.paused ? 0 : pb.classList.add('hide'));
+  if (!v.paused) hideT = setTimeout(() => pb.classList.add('hide'), 4500); };
+const toggleCtl = () => showCtl();
 const toggle = () => v.paused ? v.play().catch(() => {}) : v.pause();
 $('pp').onclick = $('big').onclick = e => { e.stopPropagation(); toggle(); showCtl(); };
 v.addEventListener('play', () => { pb.classList.add('playing'); $('pp').innerHTML = IC.pause; showCtl(); });
@@ -113,9 +119,17 @@ addEventListener('keydown', e => { if (/INPUT|TEXTAREA/.test(e.target.tagName)) 
   else if (e.key === 'ArrowRight') skip(10, 'R'); else if (e.key === 'ArrowLeft') skip(-10, 'L'); else if (e.key === 'Escape' && isFS()) exitFS(); });
 
 // ── buffering spinner ───────────────────────────────────────────────────
+// Shows after a short delay instead of instantly, and any sign of real
+// progress (timeupdate) cancels it -- so a brief, harmless network blip
+// doesn't flash "Loading stream..." on top of video that's actually fine.
+// Previously ANY 'waiting'/'seeking' event showed it immediately with no
+// debounce, which is what made it feel like it was always loading.
 const sp = $('buffering');
-['loadstart', 'waiting', 'seeking'].forEach(e => v.addEventListener(e, () => sp.classList.add('show')));
-['playing', 'canplay', 'error', 'pause'].forEach(e => v.addEventListener(e, () => sp.classList.remove('show')));
+let bufT = null;
+function showBuf() { clearTimeout(bufT); bufT = setTimeout(() => sp.classList.add('show'), 350); }
+function hideBuf() { clearTimeout(bufT); sp.classList.remove('show'); }
+['loadstart', 'waiting', 'seeking'].forEach(e => v.addEventListener(e, showBuf));
+['playing', 'canplay', 'error', 'pause', 'timeupdate'].forEach(e => v.addEventListener(e, hideBuf));
 
 // ── can't-play / no-audio → point to VLC ────────────────────────────────
 const warn = $('warn');
@@ -146,8 +160,18 @@ v.addEventListener('ended', () => { try { localStorage.removeItem(RK); } catch (
 const UA = navigator.userAgent, ANDROID = /Android/i.test(UA), IOS = /iP(hone|ad|od)/.test(UA);
 const abs = () => (/^https?:\/\//.test(BASE_URL_JS) ? BASE_URL_JS : 'https://' + BASE_URL_JS) + ORIGINAL_SRC;
 function intent(pkg) { const u = new URL(abs());
+  // Resume at the current position instead of always starting from 0.
+  // "position" (long, milliseconds) is VLC's and MX Player's own
+  // documented extra for this -- confirmed against their official intent
+  // docs, not guessed. "from_start=false" stops VLC from prompting
+  // "resume or start over" and just resumes directly. Unrecognized extras
+  // are harmless no-ops for players that don't support this (nPlayer,
+  // PLAYit), so it's safe to send unconditionally.
+  const posMs = Math.floor((v.currentTime || 0) * 1000);
+  const posExtra = posMs > 1000 ? ';B.from_start=false;l.position=' + posMs : '';
   return 'intent://' + u.host + u.pathname + '#Intent;scheme=' + u.protocol.slice(0, -1) +
-    ';action=android.intent.action.VIEW;type=video/*;package=' + pkg + ';S.title=' + encodeURIComponent(FILENAME) + ';end'; }
+    ';action=android.intent.action.VIEW;type=video/*;package=' + pkg + posExtra +
+    ';S.title=' + encodeURIComponent(FILENAME) + ';end'; }
 const APPS = {
   'vlc-link': { pkg: 'org.videolan.vlc', ios: () => 'vlc-x-callback://x-callback-url/stream?url=' + encodeURIComponent(abs()) },
   'mx-link': { pkg: 'com.mxtech.videoplayer.ad' },
