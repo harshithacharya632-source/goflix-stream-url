@@ -71,13 +71,13 @@ $('pip-link').addEventListener('click', e => { e.preventDefault(); pip(); });
 function fixRot() { pb.classList.toggle('rot', isFS() && innerHeight > innerWidth); }
 async function enterFS() {
   if (!pb.requestFullscreen && !pb.webkitRequestFullscreen && v.webkitEnterFullscreen) { v.webkitEnterFullscreen(); return; }
-  pb.classList.add('fs');
+  pb.classList.add('fs'); document.documentElement.classList.add('fsmode');
   try { await (pb.requestFullscreen ? pb.requestFullscreen({ navigationUI: 'hide' }) : pb.webkitRequestFullscreen()); } catch (e) {}
   try { await screen.orientation.lock('landscape'); } catch (e) {}
   fixRot(); setTimeout(fixRot, 400); showCtl();
 }
 function exitFS() {
-  pb.classList.remove('fs', 'rot');
+  pb.classList.remove('fs', 'rot'); document.documentElement.classList.remove('fsmode');
   try { screen.orientation.unlock(); } catch (e) {}
   if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
   else if (document.webkitFullscreenElement) document.webkitExitFullscreen();
