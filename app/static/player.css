@@ -63,3 +63,16 @@
 .pb.fs .ctl{padding:22px 24px calc(10px + env(safe-area-inset-bottom))}
 .pb.fs .crow button{min-width:40px;height:40px}
 .pb.fs .ctl svg{width:22px;height:22px}
+
+/* v7: lighter fullscreen. While fullscreen, nothing else on the page is painted or animated,
+   so all the CPU/GPU goes to decoding and drawing the video. */
+html.fsmode,html.fsmode body{overflow:hidden}
+html.fsmode .wrap>*:not(#pb){visibility:hidden}
+html.fsmode .eq i,html.fsmode .dot,html.fsmode .gauge .arc{animation:none;transition:none}
+.pb.fs{overflow:visible;box-shadow:none;border-radius:0}
+.pb.fs.hide.playing{cursor:none}
+.pb .ctl{transition:opacity .25s,visibility 0s linear 0s}
+.pb.hide .ctl{visibility:hidden;transition:opacity .25s,visibility 0s linear .25s}
+.skip,.buffering{transition:opacity .2s,visibility 0s linear .2s}
+.skip.show,.buffering.show{transition-delay:0s}
+.skip:not(.show),.buffering:not(.show){visibility:hidden}
