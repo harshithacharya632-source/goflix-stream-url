@@ -44,3 +44,22 @@
 #vol{accent-color:#fff}
 .hud u i{background:#fff}
 .pb .buffering i{border-top-color:#fff}
+
+/* v6: edge-to-edge player, small controls pinned to the bottom */
+.pb{margin:0 calc(var(--pad,14px)*-1);border:0;border-radius:0;box-shadow:none}
+.pb.fs,.pb.rot{margin:0}
+.ctl{padding:18px 10px 2px;background:linear-gradient(transparent,rgba(0,0,0,.7))}
+.seek{height:22px;margin-bottom:0}
+.seek::before,.seek i{height:3px}
+.seek::after{content:"";position:absolute;left:0;right:0;top:-8px;bottom:-8px}
+.seek b{width:12px;height:12px;margin-left:-6px;box-shadow:0 0 0 2px rgba(229,9,20,.35)}
+.crow{gap:2px}
+.crow button{min-width:32px;height:32px}
+.pb .ctl svg{width:19px;height:19px}
+.crow .tm{font-size:.74rem;margin-left:2px}
+#vol{width:64px}
+.pb .big{width:54px;height:54px}
+.pb .big svg{width:24px;height:24px}
+.pb.fs .ctl{padding:22px 24px calc(10px + env(safe-area-inset-bottom))}
+.pb.fs .crow button{min-width:40px;height:40px}
+.pb.fs .ctl svg{width:22px;height:22px}
