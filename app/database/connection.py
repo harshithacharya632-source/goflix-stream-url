@@ -14,6 +14,11 @@ class Settings(BaseSettings):
     # parallel streaming. Leave blank to stream using just the bot token.
     SESSIONS: str = ""
 
+    # Optional: extra BOT tokens (comma-separated) for more speed. Telegram limits
+    # how fast ONE account can download, so every extra bot adds another lane.
+    # Each extra bot must be an admin/member of the CHANNEL_ID storage channel.
+    BOT_TOKENS: str = ""
+
     BASE_URL: str = "http://localhost:8000"
 
     # Optional: used for rate limiting; falls back to in-memory automatically
