@@ -9,15 +9,30 @@ logger = logging.getLogger(__name__)
 
 CHUNK = 1024 * 1024  # Telegram's max request size
 
+import os as _os
+PER_CLIENT = max(1, int(_os.environ.get("STREAM_PARALLEL", "8")))   # parallel downloads per Telegram account
+MAX_WINDOW = max(2, int(_os.environ.get("STREAM_WINDOW", "24")))    # MB buffered ahead per viewer
+_sems = {}  # one limit per Telegram client, shared by ALL viewers (keeps Telegram from throttling us)
+
+
+def _sem(client):
+    import asyncio
+    s = _sems.get(id(client))
+    if s is None:
+        s = _sems[id(client)] = asyncio.Semaphore(PER_CLIENT)
+    return s
+
 
 async def ultra_high_speed_streamer(clients: list, file, start: int, end: int, chunk_size: int = CHUNK):
     """
     Stream bytes [start, end] of a Telegram file in order, as fast as possible.
 
-    - Many 1 MB chunks are downloaded IN PARALLEL (several per session, spread
-      over every session) and handed out in order, so the player gets data as
-      fast as the connection allows instead of one slow round trip at a time.
-    - Chunks are always requested on 1 MB boundaries (Telegram's rule), then the
+    - Many 1 MB chunks are downloaded IN PARALLEL (spread over every Telegram
+      connection) and handed out in order, so the player gets data as fast as
+      the connection allows instead of one slow round trip at a time.
+    - `file` may be a list with one file handle per client (each Telegram account
+      has its own handle for the same file).
+    - Chunks are requested on 1 MB boundaries (Telegram's rule), then the
       first/last one is trimmed, so seeking to any byte works.
     - Only a small window of chunks is kept ahead, so a slow phone can't make the
       server run out of memory.
@@ -26,22 +41,21 @@ async def ultra_high_speed_streamer(clients: list, file, start: int, end: int, c
     from collections import deque
 
     n = len(clients)
-    per_client = 6                           # parallel requests per session
-    window = min(2 * per_client * n, 24)     # chunks downloading or waiting to be sent
-    sems = [asyncio.Semaphore(per_client) for _ in range(n)]
+    files = list(file) if isinstance(file, (list, tuple)) else [file] * n
+    window = min(2 * PER_CLIENT * n, MAX_WINDOW)   # chunks downloading or waiting to be sent
     aligned = start - (start % chunk_size)
 
     async def fetch(i: int, pos: int) -> bytes:
         need = min(chunk_size, end + 1 - pos)
         last_err = None
         for attempt in range(4):
-            ci = (i + attempt) % n
+            ci = (i + attempt) % n   # a retry goes to the next connection
             try:
-                async with sems[ci]:
+                async with _sem(clients[ci]):
                     buf = bytearray()
                     # limit=1 -> exactly one chunk (Telethon's limit counts chunks, not bytes)
                     async for part in clients[ci].iter_download(
-                            file, offset=pos, limit=1, chunk_size=chunk_size, request_size=chunk_size):
+                            files[ci], offset=pos, limit=1, chunk_size=chunk_size, request_size=chunk_size):
                         buf += part
                 if len(buf) >= need:
                     return bytes(buf)
