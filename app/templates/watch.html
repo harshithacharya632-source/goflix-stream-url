@@ -8,19 +8,19 @@
 <script>try{var t=localStorage.getItem('goflix_theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);}catch(e){}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/player.css?v=5">
+<link rel="stylesheet" href="/static/player.css?v=6">
 <style>
 :root{--red:#e50914;--red2:#ff2d3a;--bg:#0a0a0d;--card:#14141a;--line:#24242d;--mute:#8d8d9a;--text:#fff;--text2:#cfcfd8;--chip:#1d1d25;--glow:rgba(229,9,20,.28);--bar:#22222b;--ok:#2ecc71;--warn:#f5a524}
 [data-theme=light]{--bg:#f3f3f7;--card:#fff;--line:#e0e0e8;--mute:#6a6a78;--text:#111114;--text2:#3a3a46;--chip:#eeeef3;--glow:rgba(229,9,20,.12);--bar:#e3e3eb}
 *{box-sizing:border-box;margin:0}
 html{-webkit-text-size-adjust:100%}
 body{font-family:'Outfit',system-ui,sans-serif;color:var(--text);min-height:100vh;
-  background:radial-gradient(900px 420px at 50% -120px,var(--glow),transparent 70%),var(--bg);
+  background:var(--bg);
   padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom);transition:background .25s,color .25s}
-.wrap{max-width:980px;margin:0 auto;padding:0 14px}
+.wrap{--pad:14px;max-width:980px;margin:0 auto;padding:0 var(--pad)}
 /* header */
 header{display:flex;align-items:center;justify-content:space-between;padding:14px 0;gap:10px}
-.logo{font-weight:800;font-size:1.7rem;letter-spacing:.12em;line-height:1}
+.logo{font-weight:800;font-size:1.3rem;letter-spacing:.1em;line-height:1}
 .logo .go{color:var(--red)}
 .right{display:flex;align-items:center;gap:8px}
 .pill{display:flex;align-items:center;gap:7px;font-size:.74rem;font-weight:700;letter-spacing:.06em;color:var(--red2);background:rgba(229,9,20,.1);border:1px solid rgba(229,9,20,.45);padding:7px 11px;border-radius:99px}
@@ -76,7 +76,7 @@ footer{text-align:center;color:var(--mute);font-size:.78rem;padding:26px 0 30px}
 footer b{color:var(--red)}
 .toast{position:fixed;left:50%;bottom:calc(22px + env(safe-area-inset-bottom));transform:translate(-50%,30px);opacity:0;background:#fff;color:#111;font-weight:600;font-size:.88rem;padding:11px 18px;border-radius:99px;transition:.25s;pointer-events:none;z-index:2000;box-shadow:0 6px 24px rgba(0,0,0,.35)}
 .toast.show{transform:translate(-50%,0);opacity:1}
-@media(min-width:700px){.wrap{padding:0 24px}}
+@media(min-width:700px){.wrap{--pad:24px}}
 .lbl{display:flex;align-items:center;gap:8px;font-size:.76rem;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--mute);margin:22px 0 12px}
 .lbl::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--ok)}
 h1{font-size:clamp(1.05rem,4.6vw,1.5rem);font-weight:500}
@@ -96,6 +96,31 @@ h1{font-size:clamp(1.05rem,4.6vw,1.5rem);font-weight:500}
 .info{display:grid;gap:10px;font-size:.88rem}
 .info div{display:flex;justify-content:space-between;gap:14px;color:var(--text2)}
 .info b{color:var(--text);text-align:right;overflow-wrap:anywhere}
+.srv{margin-top:22px;border-radius:20px;padding:18px;background:linear-gradient(165deg,var(--card),var(--bg));border:1px solid var(--line);box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 14px 40px rgba(0,0,0,.25)}
+.srv-top{display:flex;justify-content:space-between;align-items:center}
+.srv-top h2{margin:0;font-size:.76rem;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--mute)}
+.gauges{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:18px 0 16px}
+.gauge{position:relative;display:grid;justify-items:center;color:var(--ok)}
+.gauge.mid{color:var(--warn)}.gauge.high{color:var(--red2)}
+.gauge svg{width:100px;height:100px;transform:rotate(-90deg)}
+.gauge circle{fill:none;stroke-width:7}
+.gauge .trk{stroke:var(--bar)}
+.gauge .arc{stroke:currentColor;stroke-linecap:round;stroke-dasharray:238.76;stroke-dashoffset:238.76;transition:stroke-dashoffset .9s cubic-bezier(.2,.8,.2,1);filter:drop-shadow(0 0 5px currentColor)}
+.gauge .num{position:absolute;top:0;left:0;right:0;height:100px;display:flex;align-items:center;justify-content:center;gap:1px}
+.gauge .num b{font-size:1.6rem;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums}
+.gauge .num small{font-size:.7rem;color:var(--mute);margin-top:7px}
+.gauge .gl{margin-top:8px;font-size:.8rem;font-weight:600;letter-spacing:.08em;color:var(--mute)}
+.srv-foot{display:flex;align-items:center;justify-content:space-between;gap:16px;padding-top:15px;border-top:1px solid var(--line)}
+.live{display:flex;align-items:center;gap:12px}
+.live b{display:block;font-size:1.45rem;line-height:1;font-variant-numeric:tabular-nums}
+.live small{display:block;margin-top:4px;font-size:.74rem;color:var(--mute)}
+.eq{display:flex;align-items:flex-end;gap:3px;height:22px}
+.eq i{width:4px;border-radius:2px;background:var(--ok);animation:eq 1.1s ease-in-out infinite}
+.eq i:nth-child(2){animation-delay:.25s}.eq i:nth-child(3){animation-delay:.5s}
+@keyframes eq{0%,100%{height:5px}50%{height:22px}}
+.spark{flex:1;max-width:150px;height:34px}
+.spark polyline{fill:none;stroke:var(--ok);stroke-width:1.6;vector-effect:non-scaling-stroke;stroke-linejoin:round}
+.spark polygon{fill:rgba(46,204,113,.14)}
 </style>
 </head>
 <body>
@@ -144,8 +169,8 @@ h1{font-size:clamp(1.05rem,4.6vw,1.5rem);font-weight:500}
   <!-- 3. PLAYER APPS -->
   <div class="lbl">Open in app</div>
   <div class="apps">
-    <a class="btn" id="mx-link" href="#"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9.5" fill="none" stroke="#ff7a1a" stroke-width="2"/><path d="M10 7.8l6 4.2-6 4.2z" fill="#ff7a1a"/></svg>MX Player</a>
     <a class="btn" id="vlc-link" href="#"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9.5" fill="none" stroke="#ff7a1a" stroke-width="2"/><path d="M10 7.8l6 4.2-6 4.2z" fill="#ff7a1a"/></svg>VLC</a>
+    <a class="btn" id="mx-link" href="#"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9.5" fill="none" stroke="#ff7a1a" stroke-width="2"/><path d="M10 7.8l6 4.2-6 4.2z" fill="#ff7a1a"/></svg>MX Player</a>
     <a class="btn" id="playit-link" href="#"><svg class="ic" viewBox="0 0 24 24"><rect x="2.5" y="4" width="19" height="13" rx="2" fill="none" stroke="#18b9e8" stroke-width="2"/><path d="M8 21h8M12 17v4" stroke="#18b9e8" stroke-width="2" stroke-linecap="round"/></svg>Play it</a>
     <a class="btn" id="pip-link" href="#"><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="3" width="13" height="10" rx="2" fill="#b565d9"/><rect x="9" y="9" width="12" height="11" rx="2" fill="#d58cf0" stroke="#14141a" stroke-width="1.5"/></svg>PiP Mode</a>
   </div>
@@ -175,12 +200,15 @@ h1{font-size:clamp(1.05rem,4.6vw,1.5rem);font-weight:500}
     <p class="hint">More than one audio language? This web player can't switch tracks. Open the video in <b>VLC</b> and switch there.</p>
   </div>
 
-  <div class="card">
-    <div class="load-head"><h2>Server status</h2><span class="load-tag" id="load-tag">…</span></div>
-    <div class="meters">
-      <div class="meter"><div class="row"><span>CPU</span><b id="cpu-val">–</b></div><div class="bar"><i id="cpu-bar"></i></div></div>
-      <div class="meter"><div class="row"><span>Memory</span><b id="mem-val">–</b></div><div class="bar"><i id="mem-bar"></i></div></div>
-      <div class="streams"><span>Active streams</span><b id="streams-val">–</b></div>
+  <div class="srv">
+    <div class="srv-top"><h2>Server status</h2><span class="load-tag" id="load-tag">…</span></div>
+    <div class="gauges">
+      <div class="gauge" id="cpu-g"><svg viewBox="0 0 100 100"><circle class="trk" cx="50" cy="50" r="38"/><circle class="arc" id="cpu-ring" cx="50" cy="50" r="38"/></svg><div class="num"><b id="cpu-val">–</b><small>%</small></div><span class="gl">CPU</span></div>
+      <div class="gauge" id="mem-g"><svg viewBox="0 0 100 100"><circle class="trk" cx="50" cy="50" r="38"/><circle class="arc" id="mem-ring" cx="50" cy="50" r="38"/></svg><div class="num"><b id="mem-val">–</b><small>%</small></div><span class="gl">Memory</span></div>
+    </div>
+    <div class="srv-foot">
+      <div class="live"><span class="eq"><i></i><i></i><i></i></span><div><b id="streams-val">–</b><small>Active streams</small></div></div>
+      <svg class="spark" viewBox="0 0 120 30" preserveAspectRatio="none"><polygon id="spark-fill" points=""/><polyline id="spark-line" points=""/></svg>
     </div>
   </div>
 
@@ -241,9 +269,15 @@ function shareLink() {
 
 // ── Server status ─────────────────────────────────────────────────────────
 const level = p => p >= 85 ? 'high' : p >= 60 ? 'mid' : '';
+const CIRC = 2 * Math.PI * 38, hist = [];
 function setMeter(id, p) {
-  const bar = $(id + '-bar'); bar.style.width = Math.min(p, 100) + '%'; bar.className = level(p);
-  $(id + '-val').textContent = Math.round(p) + '%';
+  $(id + '-ring').style.strokeDashoffset = CIRC * (1 - Math.min(p, 100) / 100);
+  $(id + '-g').className = 'gauge ' + level(p); $(id + '-val').textContent = Math.round(p);
+}
+function drawSpark() {
+  const n = hist.length; if (n < 2) return;
+  const pts = hist.map((v, i) => (i * 120 / (hist.length - 1)).toFixed(1) + ',' + (28 - Math.min(v, 100) / 100 * 26).toFixed(1)).join(' ');
+  $('spark-line').setAttribute('points', pts); $('spark-fill').setAttribute('points', '0,30 ' + pts + ' 120,30');
 }
 async function refreshLoad() {
   if (document.hidden) return;
@@ -252,6 +286,7 @@ async function refreshLoad() {
     setMeter('cpu', d.cpu);
     if (d.mem != null) setMeter('mem', d.mem); else $('mem-val').textContent = 'n/a';
     $('streams-val').textContent = d.watching != null ? d.watching : d.streams;
+    hist.push(d.cpu); if (hist.length > 30) hist.shift(); drawSpark();
     const lv = level(Math.max(d.cpu, d.mem || 0));
     $('load-tag').textContent = lv === 'high' ? 'Heavy' : lv === 'mid' ? 'Moderate' : 'Low';
     $('load-tag').className = 'load-tag ' + lv;
@@ -261,6 +296,6 @@ async function refreshLoad() {
 refreshLoad();
 setInterval(refreshLoad, 5000);
 </script>
-<script src="/static/player.js?v=5"></script>
+<script src="/static/player.js?v=6"></script>
 </body>
 </html>
