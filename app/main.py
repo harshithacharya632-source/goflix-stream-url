@@ -38,6 +38,11 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Goflix Stream URL", lifespan=lifespan)
 
+# UPI "open in PhonePe/GPay/Paytm/Navi" redirect page used by the Goflix bot's pay buttons.
+# Must be registered BEFORE the catch-all /{hashid} routes at the bottom of this file.
+from app.upi_pay import router as upi_pay_router
+app.include_router(upi_pay_router)
+
 # Enable Compression
 class _GZipNotMedia(GZipMiddleware):
     """Gzip pages/JSON only. Gzipping video wastes CPU, breaks Content-Length (download size shows '?')
