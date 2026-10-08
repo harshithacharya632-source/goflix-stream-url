@@ -31,7 +31,7 @@ Telegram only allows https:// links on buttons, so a tap always hits this server
 Two kinds of pages
 ------------------
 /open/<app> and /open  - the Telegram app buttons. They only OPEN the UPI app (nothing is passed to it, so
-                         the app shows no payment-link warning); the user then scans the saved QR in the app.
+                         the app shows no payment-link warning); the user then taps Scan QR in the app and scans the QR by hand.
 /pay                   - signed payment links (amount + payee pre-filled). Still works for older messages.
 
 The bot signs every /pay link (amount + note) with that key. This page refuses anything
@@ -211,21 +211,22 @@ def render_pay_page(amount, note: str, app_key: str = None, user_agent: str = ""
 
 # ───────────────────── "just open the app" (no payment details) ─────────────────────
 # Used by the Telegram app buttons: the app is only OPENED, nothing (amount / UPI id) is passed to it, so the
-# app shows none of its "payment from a link" warnings. The user then scans the saved QR from the gallery.
+# app shows none of its "payment from a link" warnings. The user then taps Scan QR in the app and scans by hand.
 def play_store_url(app_key: str) -> str:
     return f"https://play.google.com/store/apps/details?id={UPI_APPS[app_key]['package']}"
 
 
-def open_app_url(app_key: str, platform: str, fallback: str = None):
+def open_app_url(app_key: str, platform: str):
     """Link that only opens the app. None when this device can't do it directly (e.g. a computer)."""
     meta = UPI_APPS[app_key]
     scheme = meta.get("scheme")
-    if not scheme:                                  # no known app link: the Play Store page has an "Open" button
-        return play_store_url(app_key) if platform == "android" else None
     if platform == "android":
-        fb = f";S.browser_fallback_url={quote(fallback, safe='')}" if fallback else ""
-        return f"intent://#Intent;scheme={scheme};package={meta['package']}{fb};end"
-    if platform == "ios":
+        store = play_store_url(app_key)
+        if not scheme:                              # no known app link: the Play Store page has an "Open" button
+            return store
+        # If the app doesn't answer the link, Chrome goes to the app's Play Store page (which has "Open").
+        return f"intent://#Intent;scheme={scheme};package={meta['package']};S.browser_fallback_url={quote(store, safe='')};end"
+    if platform == "ios" and scheme:
         return f"{scheme}://"
     return None
 
@@ -248,14 +249,15 @@ def render_open_page(app_key: str = None, user_agent: str = "", failed: bool = F
     if platform == "desktop":
         hint = "This page is meant for your phone. On a computer, scan the QR code shown in Telegram with your phone."
     elif failed and chosen:
-        hint = (f"Couldn't open {UPI_APPS[chosen]['name']} automatically. Open it from your phone's home screen, "
-                "or tap its button above (Android: from Google Play tap Open).")
+        hint = (f"Couldn't open {UPI_APPS[chosen]['name']} automatically. Tap its button above, "
+                "or open it from your phone's home screen.")
     else:
-        hint = "App didn't open? Open it from your phone's home screen instead."
+        hint = "App didn't open? Tap the button above, or open the app from your phone's home screen."
     auto = ""
-    if chosen and not failed and platform == "ios" and UPI_APPS[chosen].get("scheme"):
+    first = open_app_url(chosen, platform) if chosen else None
+    if first and not failed and platform in ("android", "ios"):
         auto = ("<script>setTimeout(function(){window.location.href="
-                + json.dumps(open_app_url(chosen, "ios")).replace("</", "<\\/") + ";},250);</script>")
+                + json.dumps(first).replace("</", "<\\/") + ";},250);</script>")
     return (
         '<!doctype html><html lang="en"><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width,initial-scale=1">'
@@ -268,7 +270,7 @@ def render_open_page(app_key: str = None, user_agent: str = "", failed: bool = F
         ".btn.main{background:#2f6bff;border-color:#2f6bff}"
         ".hint{color:#9aa3b2;font-size:13px;line-height:1.5;margin:18px 0 0}"
         '</style></head><body><main><h1>Open your UPI app</h1>'
-        '<p class="sub">Then choose <b>Scan QR</b> → pick the saved QR from your gallery → pay.</p>'
+        '<p class="sub">Then tap <b>Scan QR</b> and scan the payment QR from Telegram.</p>'
         + "".join(buttons)
         + f'<p class="hint">{esc(hint)}</p>'
         '<p class="hint">After paying, go back to Telegram, tap “I\'ve paid” and send the payment screenshot.</p>'
@@ -322,16 +324,13 @@ async def upi_pay_page(
 
 
 async def _open_response(request: Request, app_key: str, failed: bool):
-    ua = request.headers.get("user-agent", "")
-    headers = {"Cache-Control": "no-store"}
     if app_key and app_key not in UPI_APPS:
         raise HTTPException(status_code=404, detail="Not Found")
-    # Android + a chosen app that has an app link: jump straight in, no page in between.
-    if (request.method == "GET" and app_key and not failed and detect_platform(ua) == "android"
-            and UPI_APPS[app_key].get("scheme")):
-        target = open_app_url(app_key, "android", fallback=_self_url(request, failed="1"))
-        return RedirectResponse(target, status_code=302, headers=headers)
-    return HTMLResponse(render_open_page(app_key or None, ua, failed), headers=headers)
+    ua = request.headers.get("user-agent", "")
+    # Always a page (not a silent redirect): it tries to open the app by itself AND shows a big button, because
+    # a real tap is what Chrome / Telegram's browser trust most. If the app doesn't answer, the user lands on
+    # its Play Store page, which has an Open button.
+    return HTMLResponse(render_open_page(app_key or None, ua, failed), headers={"Cache-Control": "no-store"})
 
 
 @router.api_route("/open", methods=["GET", "HEAD"], response_class=HTMLResponse, include_in_schema=False)
