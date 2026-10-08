@@ -11,9 +11,6 @@ Environment variables on the stream service
 -------------------------------------------
 UPI_ID           same UPI id the bot uses, e.g. name@okaxis        (required)
 UPI_PAYEE_NAME   shown in the UPI app, default "Goflix"             (optional)
-UPI_INTENT_MODE  "04" (default) tells the UPI app this payment is an Intent opened from a link, not a
-                 QR code from the gallery (which has the 2,000 rupee limit notice). Set it to  off  to
-                 leave the field out again, or 00 for the generic value.   (optional)
 GOFLIX_BOT_TOKEN the token of the main Goflix bot (the one that sends the QR / pay buttons)
   or PAY_SECRET  64-hex key derived from that token (keeps the token itself off this server)
 
@@ -31,7 +28,13 @@ Telegram only allows https:// links on buttons, so a tap always hits this server
 * iPhone: a tiny page that opens the app by itself (plus buttons as a backup).
 * Anything else (desktop, no app chosen): the page with all the app buttons.
 
-The bot signs every link (amount + note) with that key. This page refuses anything
+Two kinds of pages
+------------------
+/open/<app> and /open  - the Telegram app buttons. They only OPEN the UPI app (nothing is passed to it, so
+                         the app shows no payment-link warning); the user then scans the saved QR in the app.
+/pay                   - signed payment links (amount + payee pre-filled). Still works for older messages.
+
+The bot signs every /pay link (amount + note) with that key. This page refuses anything
 whose signature doesn't match, and the payee is ALWAYS the UPI_ID from this server's
 environment, so the page can't be used to send money anywhere else or to change the amount.
 """
@@ -49,13 +52,6 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 UPI_ID = os.environ.get("UPI_ID", "").strip()
 UPI_PAYEE_NAME = os.environ.get("UPI_PAYEE_NAME", "Goflix").strip()
-# NPCI UPI linking spec, "mode" field: 04 = Intent (payment launched from a link / another app),
-# 01 = QR code. Without it some UPI apps cannot tell and treat the payment like a QR image picked from
-# the gallery, which shows "You can pay up to Rs 2,000 with QR codes via gallery".
-# Only 04 and 00 are accepted here (05 = "secure intent" needs a bank signature we cannot make);
-# anything else, e.g. "off", leaves the field out.
-_mode = os.environ.get("UPI_INTENT_MODE", "04").strip().lower()
-UPI_INTENT_MODE = _mode if _mode in ("04", "00") else ""
 _BOT_TOKEN = os.environ.get("GOFLIX_BOT_TOKEN", "")   # not stripped: must match the bot byte-for-byte
 _PAY_SECRET = os.environ.get("PAY_SECRET", "").strip()
 
@@ -63,10 +59,10 @@ _VPA_RE = re.compile(r"^[A-Za-z0-9.\-_]{2,256}@[A-Za-z][A-Za-z0-9]{1,64}$")
 _MAX_AMOUNT = Decimal("100000")
 
 UPI_APPS = {
-    "phonepe": {"name": "PhonePe",    "package": "com.phonepe.app",                         "ios": "phonepe://pay"},
-    "gpay":    {"name": "Google Pay", "package": "com.google.android.apps.nbu.paisa.user", "ios": "tez://upi/pay"},
-    "paytm":   {"name": "Paytm",      "package": "net.one97.paytm",                         "ios": "paytmmp://upi/pay"},
-    "navi":    {"name": "Navi",       "package": "com.naviapp",                             "ios": "navipay://pay"},
+    "phonepe": {"name": "PhonePe",    "package": "com.phonepe.app",                         "ios": "phonepe://pay", "scheme": "phonepe"},
+    "gpay":    {"name": "Google Pay", "package": "com.google.android.apps.nbu.paisa.user", "ios": "tez://upi/pay", "scheme": "tez"},
+    "paytm":   {"name": "Paytm",      "package": "net.one97.paytm",                         "ios": "paytmmp://upi/pay", "scheme": "paytmmp"},
+    "navi":    {"name": "Navi",       "package": "com.naviapp",                             "ios": "navipay://pay", "scheme": "navipay"},
     # extra apps, shown on the "Other UPI apps" page. Delete any line you don't want listed.
     "bhim":    {"name": "BHIM",       "package": "in.org.npci.upiapp",                      "ios": None},
     "amazon":  {"name": "Amazon Pay", "package": "in.amazon.mShop.android.shopping",        "ios": None},
@@ -132,8 +128,6 @@ def build_upi_query(amount, note: str = "") -> str:
     params = [("pa", UPI_ID), ("pn", UPI_PAYEE_NAME or "Goflix"), ("am", format_amount(amount)), ("cu", "INR")]
     if note:
         params.append(("tn", note[:50]))
-    if UPI_INTENT_MODE:
-        params.append(("mode", UPI_INTENT_MODE))
     return "&".join(f"{k}={quote(v, safe='@.-_')}" for k, v in params)
 
 
@@ -215,6 +209,73 @@ def render_pay_page(amount, note: str, app_key: str = None, user_agent: str = ""
     )
 
 
+# ───────────────────── "just open the app" (no payment details) ─────────────────────
+# Used by the Telegram app buttons: the app is only OPENED, nothing (amount / UPI id) is passed to it, so the
+# app shows none of its "payment from a link" warnings. The user then scans the saved QR from the gallery.
+def play_store_url(app_key: str) -> str:
+    return f"https://play.google.com/store/apps/details?id={UPI_APPS[app_key]['package']}"
+
+
+def open_app_url(app_key: str, platform: str, fallback: str = None):
+    """Link that only opens the app. None when this device can't do it directly (e.g. a computer)."""
+    meta = UPI_APPS[app_key]
+    scheme = meta.get("scheme")
+    if not scheme:                                  # no known app link: the Play Store page has an "Open" button
+        return play_store_url(app_key) if platform == "android" else None
+    if platform == "android":
+        fb = f";S.browser_fallback_url={quote(fallback, safe='')}" if fallback else ""
+        return f"intent://#Intent;scheme={scheme};package={meta['package']}{fb};end"
+    if platform == "ios":
+        return f"{scheme}://"
+    return None
+
+
+def render_open_page(app_key: str = None, user_agent: str = "", failed: bool = False) -> str:
+    platform = detect_platform(user_agent)
+    chosen = app_key if app_key in UPI_APPS else None
+    esc = lambda s: html.escape(s, quote=True)
+    keys = [k for k in UPI_APPS if platform == "android" or UPI_APPS[k].get("scheme")]
+    if chosen and chosen in keys:
+        keys.remove(chosen)
+        keys.insert(0, chosen)
+    buttons = []
+    for i, k in enumerate(keys):
+        href = open_app_url(k, platform)
+        if not href:
+            continue
+        cls = "btn main" if (chosen and i == 0) else "btn"
+        buttons.append(f'<a class="{cls}" href="{esc(href)}">Open {esc(UPI_APPS[k]["name"])}</a>')
+    if platform == "desktop":
+        hint = "This page is meant for your phone. On a computer, scan the QR code shown in Telegram with your phone."
+    elif failed and chosen:
+        hint = (f"Couldn't open {UPI_APPS[chosen]['name']} automatically. Open it from your phone's home screen, "
+                "or tap its button above (Android: from Google Play tap Open).")
+    else:
+        hint = "App didn't open? Open it from your phone's home screen instead."
+    auto = ""
+    if chosen and not failed and platform == "ios" and UPI_APPS[chosen].get("scheme"):
+        auto = ("<script>setTimeout(function(){window.location.href="
+                + json.dumps(open_app_url(chosen, "ios")).replace("</", "<\\/") + ";},250);</script>")
+    return (
+        '<!doctype html><html lang="en"><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        "<title>Open your UPI app — Goflix</title><style>"
+        "body{margin:0;background:#0f1115;color:#f2f4f8;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;"
+        "display:flex;justify-content:center}main{width:100%;max-width:420px;padding:28px 18px;text-align:center}"
+        "h1{font-size:26px;margin:6px 0}.sub{color:#9aa3b2;margin:0 0 22px;line-height:1.5}"
+        ".btn{display:block;margin:10px 0;padding:15px;border-radius:12px;background:#1d2330;color:#fff;"
+        "text-decoration:none;font-weight:600;font-size:17px;border:1px solid #2c3446}"
+        ".btn.main{background:#2f6bff;border-color:#2f6bff}"
+        ".hint{color:#9aa3b2;font-size:13px;line-height:1.5;margin:18px 0 0}"
+        '</style></head><body><main><h1>Open your UPI app</h1>'
+        '<p class="sub">Then choose <b>Scan QR</b> → pick the saved QR from your gallery → pay.</p>'
+        + "".join(buttons)
+        + f'<p class="hint">{esc(hint)}</p>'
+        '<p class="hint">After paying, go back to Telegram, tap “I\'ve paid” and send the payment screenshot.</p>'
+        + auto + "</main></body></html>"
+    )
+
+
 # ───────────────────────────── the route ─────────────────────────────
 _HOST_RE = re.compile(r"^[A-Za-z0-9.\-]+(:\d{1,5})?$")
 
@@ -260,6 +321,29 @@ async def upi_pay_page(
     return HTMLResponse(page, headers=headers)
 
 
+async def _open_response(request: Request, app_key: str, failed: bool):
+    ua = request.headers.get("user-agent", "")
+    headers = {"Cache-Control": "no-store"}
+    if app_key and app_key not in UPI_APPS:
+        raise HTTPException(status_code=404, detail="Not Found")
+    # Android + a chosen app that has an app link: jump straight in, no page in between.
+    if (request.method == "GET" and app_key and not failed and detect_platform(ua) == "android"
+            and UPI_APPS[app_key].get("scheme")):
+        target = open_app_url(app_key, "android", fallback=_self_url(request, failed="1"))
+        return RedirectResponse(target, status_code=302, headers=headers)
+    return HTMLResponse(render_open_page(app_key or None, ua, failed), headers=headers)
+
+
+@router.api_route("/open", methods=["GET", "HEAD"], response_class=HTMLResponse, include_in_schema=False)
+async def upi_open_list(request: Request):
+    return await _open_response(request, "", False)
+
+
+@router.api_route("/open/{app_key}", methods=["GET", "HEAD"], response_class=HTMLResponse, include_in_schema=False)
+async def upi_open_app(request: Request, app_key: str, failed: str = Query("")):
+    return await _open_response(request, app_key, bool(failed))
+
+
 @router.get("/pay/check", include_in_schema=False)
 async def upi_pay_check(am: str = Query(""), tn: str = Query(""), sig: str = Query("")):
     """Diagnostics only: says WHY /pay answers 404. Shows no secrets. Safe to delete later."""
@@ -279,7 +363,6 @@ async def upi_pay_check(am: str = Query(""), tn: str = Query(""), sig: str = Que
     return JSONResponse({
         "page": "upi_pay.py is live on this server",
         "UPI_ID": "ok" if (UPI_ID and _VPA_RE.match(UPI_ID)) else "MISSING or invalid - add UPI_ID to this service",
-        "intent_mode": UPI_INTENT_MODE or "off",
         "secret": secret,
         "signature": signature,
     })
@@ -291,4 +374,3 @@ if __name__ == "__main__":
     if len(sys.argv) != 2:
         sys.exit('usage: python upi_pay.py "<BOT_TOKEN>"')
     print(derive_secret(sys.argv[1]).hex())
-    
