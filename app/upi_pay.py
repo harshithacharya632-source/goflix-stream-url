@@ -59,10 +59,10 @@ _VPA_RE = re.compile(r"^[A-Za-z0-9.\-_]{2,256}@[A-Za-z][A-Za-z0-9]{1,64}$")
 _MAX_AMOUNT = Decimal("100000")
 
 UPI_APPS = {
-    "phonepe": {"name": "PhonePe",    "package": "com.phonepe.app",                         "ios": "phonepe://pay", "scheme": "phonepe"},
-    "gpay":    {"name": "Google Pay", "package": "com.google.android.apps.nbu.paisa.user", "ios": "tez://upi/pay", "scheme": "tez"},
-    "paytm":   {"name": "Paytm",      "package": "net.one97.paytm",                         "ios": "paytmmp://upi/pay", "scheme": "paytmmp"},
-    "navi":    {"name": "Navi",       "package": "com.naviapp",                             "ios": "navipay://pay", "scheme": "navipay"},
+    "phonepe": {"name": "PhonePe",    "package": "com.phonepe.app",                         "ios": "phonepe://pay", "scheme": "phonepe", "open_path": "pay"},
+    "gpay":    {"name": "Google Pay", "package": "com.google.android.apps.nbu.paisa.user", "ios": "tez://upi/pay", "scheme": "tez", "open_path": "upi/pay"},
+    "paytm":   {"name": "Paytm",      "package": "net.one97.paytm",                         "ios": "paytmmp://upi/pay", "scheme": "paytmmp", "open_path": "upi/pay"},
+    "navi":    {"name": "Navi",       "package": "com.naviapp",                             "ios": "navipay://pay", "scheme": "navipay", "open_path": "pay"},
     # extra apps, shown on the "Other UPI apps" page. Delete any line you don't want listed.
     "bhim":    {"name": "BHIM",       "package": "in.org.npci.upiapp",                      "ios": None},
     "amazon":  {"name": "Amazon Pay", "package": "in.amazon.mShop.android.shopping",        "ios": None},
@@ -217,17 +217,19 @@ def play_store_url(app_key: str) -> str:
 
 
 def open_app_url(app_key: str, platform: str):
-    """Link that only opens the app. None when this device can't do it directly (e.g. a computer)."""
+    """Link that only opens the app (no amount, no UPI id). None when this device can't do it (e.g. a computer).
+    Uses the link each app itself registers (scheme + its own path); a bare "scheme://" matches nothing in
+    PhonePe / GPay and makes Paytm show "App upgrade required"."""
     meta = UPI_APPS[app_key]
     scheme = meta.get("scheme")
     if platform == "android":
         store = play_store_url(app_key)
         if not scheme:                              # no known app link: the Play Store page has an "Open" button
             return store
-        # If the app doesn't answer the link, Chrome goes to the app's Play Store page (which has "Open").
-        return f"intent://#Intent;scheme={scheme};package={meta['package']};S.browser_fallback_url={quote(store, safe='')};end"
+        path = meta.get("open_path", "")
+        return f"intent://{path}#Intent;scheme={scheme};package={meta['package']};S.browser_fallback_url={quote(store, safe='')};end"
     if platform == "ios" and scheme:
-        return f"{scheme}://"
+        return f"{scheme}://{meta.get('open_path', '')}"
     return None
 
 
@@ -252,12 +254,15 @@ def render_open_page(app_key: str = None, user_agent: str = "", failed: bool = F
         hint = (f"Couldn't open {UPI_APPS[chosen]['name']} automatically. Tap its button above, "
                 "or open it from your phone's home screen.")
     else:
-        hint = "App didn't open? Tap the button above, or open the app from your phone's home screen."
+        hint = "If the app shows a message about this link, ignore it: go to its home screen and tap Scan QR."
     auto = ""
     first = open_app_url(chosen, platform) if chosen else None
-    if first and not failed and platform in ("android", "ios"):
+    if first and not failed and platform == "ios":
         auto = ("<script>setTimeout(function(){window.location.href="
                 + json.dumps(first).replace("</", "<\\/") + ";},250);</script>")
+    store_link = ""
+    if chosen and platform == "android":
+        store_link = f'<a class="btn alt" href="{esc(play_store_url(chosen))}">Still not opening? Open from Google Play</a>'
     return (
         '<!doctype html><html lang="en"><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width,initial-scale=1">'
@@ -267,11 +272,11 @@ def render_open_page(app_key: str = None, user_agent: str = "", failed: bool = F
         "h1{font-size:26px;margin:6px 0}.sub{color:#9aa3b2;margin:0 0 22px;line-height:1.5}"
         ".btn{display:block;margin:10px 0;padding:15px;border-radius:12px;background:#1d2330;color:#fff;"
         "text-decoration:none;font-weight:600;font-size:17px;border:1px solid #2c3446}"
-        ".btn.main{background:#2f6bff;border-color:#2f6bff}"
+        ".btn.main{background:#2f6bff;border-color:#2f6bff}.btn.alt{background:transparent;color:#9aa3b2;font-weight:500;font-size:15px}"
         ".hint{color:#9aa3b2;font-size:13px;line-height:1.5;margin:18px 0 0}"
         '</style></head><body><main><h1>Open your UPI app</h1>'
-        '<p class="sub">Then tap <b>Scan QR</b> and scan the payment QR from Telegram.</p>'
-        + "".join(buttons)
+        '<p class="sub">Tap the button to open the app. Then tap <b>Scan QR</b> and scan the payment QR from Telegram.</p>'
+        + "".join(buttons) + store_link
         + f'<p class="hint">{esc(hint)}</p>'
         '<p class="hint">After paying, go back to Telegram, tap “I\'ve paid” and send the payment screenshot.</p>'
         + auto + "</main></body></html>"
