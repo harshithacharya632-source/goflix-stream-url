@@ -11,6 +11,9 @@ Environment variables on the stream service
 -------------------------------------------
 UPI_ID           same UPI id the bot uses, e.g. name@okaxis        (required)
 UPI_PAYEE_NAME   shown in the UPI app, default "Goflix"             (optional)
+UPI_INTENT_MODE  "04" (default) tells the UPI app this payment is an Intent opened from a link, not a
+                 QR code from the gallery (which has the 2,000 rupee limit notice). Set it to  off  to
+                 leave the field out again, or 00 for the generic value.   (optional)
 GOFLIX_BOT_TOKEN the token of the main Goflix bot (the one that sends the QR / pay buttons)
   or PAY_SECRET  64-hex key derived from that token (keeps the token itself off this server)
 
@@ -46,6 +49,13 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 UPI_ID = os.environ.get("UPI_ID", "").strip()
 UPI_PAYEE_NAME = os.environ.get("UPI_PAYEE_NAME", "Goflix").strip()
+# NPCI UPI linking spec, "mode" field: 04 = Intent (payment launched from a link / another app),
+# 01 = QR code. Without it some UPI apps cannot tell and treat the payment like a QR image picked from
+# the gallery, which shows "You can pay up to Rs 2,000 with QR codes via gallery".
+# Only 04 and 00 are accepted here (05 = "secure intent" needs a bank signature we cannot make);
+# anything else, e.g. "off", leaves the field out.
+_mode = os.environ.get("UPI_INTENT_MODE", "04").strip().lower()
+UPI_INTENT_MODE = _mode if _mode in ("04", "00") else ""
 _BOT_TOKEN = os.environ.get("GOFLIX_BOT_TOKEN", "")   # not stripped: must match the bot byte-for-byte
 _PAY_SECRET = os.environ.get("PAY_SECRET", "").strip()
 
@@ -122,6 +132,8 @@ def build_upi_query(amount, note: str = "") -> str:
     params = [("pa", UPI_ID), ("pn", UPI_PAYEE_NAME or "Goflix"), ("am", format_amount(amount)), ("cu", "INR")]
     if note:
         params.append(("tn", note[:50]))
+    if UPI_INTENT_MODE:
+        params.append(("mode", UPI_INTENT_MODE))
     return "&".join(f"{k}={quote(v, safe='@.-_')}" for k, v in params)
 
 
@@ -267,6 +279,7 @@ async def upi_pay_check(am: str = Query(""), tn: str = Query(""), sig: str = Que
     return JSONResponse({
         "page": "upi_pay.py is live on this server",
         "UPI_ID": "ok" if (UPI_ID and _VPA_RE.match(UPI_ID)) else "MISSING or invalid - add UPI_ID to this service",
+        "intent_mode": UPI_INTENT_MODE or "off",
         "secret": secret,
         "signature": signature,
     })
@@ -278,3 +291,4 @@ if __name__ == "__main__":
     if len(sys.argv) != 2:
         sys.exit('usage: python upi_pay.py "<BOT_TOKEN>"')
     print(derive_secret(sys.argv[1]).hex())
+    
