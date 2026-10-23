@@ -70,6 +70,7 @@ templates = Jinja2Templates(directory="app/templates")
 # while buffering/seeking), so remember a message for a few minutes.
 _MSG_TTL = 300
 _msg_cache = {}  # (client, message_id) -> (expires_at, msg, media)
+_msg_fail = {}   # (client, message_id) -> time until which that account is skipped for this message
 
 
 async def _fetch_media(client, message_id: int):
@@ -133,7 +134,13 @@ async def watch_page(request: Request, message_id: int, filename: str | None = N
 @app.get("/stream/{message_id}")
 @app.get("/stream/{message_id}/{filename:path}")
 async def stream_file(request: Request, message_id: int, filename: str | None = None):
-    clients = session_manager.get_all_clients()
+    all_clients = session_manager.get_all_clients()
+
+    # An account that couldn't see this message a moment ago is skipped for a minute. A browser
+    # makes many requests for one video, and retrying a broken account on every one of them
+    # added a slow Telegram round trip before the first byte each time.
+    now = time.time()
+    clients = [c for c in all_clients if _msg_fail.get((id(c), message_id), 0) <= now] or all_clients
 
     # Every Telegram account needs its OWN handle for the file (file handles are
     # per-account), so look the message up with each client. Cached for 5 minutes.
@@ -144,6 +151,9 @@ async def stream_file(request: Request, message_id: int, filename: str | None = 
     for c, r in zip(clients, results):
         if isinstance(r, Exception):
             logger.warning(f"A Telegram client can't see message {message_id}: {r}")
+            if len(_msg_fail) > 512:
+                _msg_fail.clear()
+            _msg_fail[(id(c), message_id)] = now + 60
 
     msg = usable[0][1][0]
     file_info = msg.file
@@ -178,6 +188,14 @@ async def _count_stream(body):
             yield chunk
     finally:
         _active_streams -= 1
+        # Close the real stream right now so its Telegram downloads are cancelled
+        # immediately when the browser drops the connection (seek / new range request).
+        aclose = getattr(body, "aclose", None)
+        if aclose:
+            try:
+                await aclose()
+            except Exception:
+                pass
 
 
 def _mem_percent():
