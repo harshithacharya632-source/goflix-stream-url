@@ -93,6 +93,8 @@ h1{font-size:clamp(1.05rem,4.6vw,1.5rem);font-weight:500}
 .apps .btn{flex-direction:column;gap:8px;padding:16px 6px;font-size:.88rem}
 .apps .btn svg.ic{width:28px;height:28px}
 .btn.vlcpc{width:100%;margin-top:12px;color:#5db8ff;background:rgba(40,110,200,.14);border-color:rgba(70,150,255,.45)}
+.btn.dm1{width:100%;margin-top:10px;color:#fff;background:linear-gradient(135deg,#169c4d,#2ecc71);border-color:transparent;box-shadow:0 8px 22px rgba(46,204,113,.25)}
+.hint a{color:var(--ok);font-weight:700;text-decoration:underline;cursor:pointer}
 .info{display:grid;gap:10px;font-size:.88rem}
 .info div{display:flex;justify-content:space-between;gap:14px;color:var(--text2)}
 .info b{color:var(--text);text-align:right;overflow-wrap:anywhere}
@@ -183,6 +185,10 @@ h1{font-size:clamp(1.05rem,4.6vw,1.5rem);font-weight:500}
       <svg viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 10.5l6.8-4M8.6 13.5l6.8 4"/></svg>Share</button>
   </div>
 
+  <!-- 4b. 1DM FAST DOWNLOAD (opens the 1DM app with the download link) -->
+  <button class="btn dm1" type="button" onclick="dm1Open()">
+    <svg viewBox="0 0 24 24"><path d="M13 2L4 14h7l-1 8 9-12h-7z"/></svg>1DM Fast Download</button>
+
   <!-- 5. COPY VLC LINK (PC / LAPTOP) -->
   <button class="btn vlcpc" type="button" onclick="copyLink(true)">
     <svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg>Copy VLC Link (for PC/Laptop)</button>
@@ -196,7 +202,7 @@ h1{font-size:clamp(1.05rem,4.6vw,1.5rem);font-weight:500}
       <div><span>Format</span><b id="info-fmt"></b></div>
     </div>
     <p class="hint">Laptop: tap <b>Copy VLC Link</b>, open VLC, press <b>Ctrl+N</b> (Mac: <b>⌘N</b>), paste, then Play.</p>
-    <p class="hint">Download slow? Use a download app like <b>ADM</b>, <b>1DM</b> or <b>IDM</b>.</p>
+    <p class="hint">Download slow? Tap <b>1DM Fast Download</b>. Not opening? Try <a onclick="dm1Open('plus')">1DM+</a> · <a onclick="dm1Open('lite')">1DM Lite</a> · <a onclick="dm1Copy()">Copy download link</a></p>
     <p class="hint">More than one audio language? This web player can't switch tracks. Open the video in <b>VLC</b> and switch there.</p>
   </div>
 
@@ -265,6 +271,40 @@ function shareLink() {
   const u = location.href.split('#')[0];
   if (navigator.share) navigator.share({ title: FILENAME, url: u }).catch(() => {});
   else (navigator.clipboard ? navigator.clipboard.writeText(u) : Promise.reject()).then(() => toast('Link copied')).catch(() => prompt('Copy this link:', u));
+}
+
+// ── 1DM Fast Download ─────────────────────────────────────────────────────
+// Opens the 1DM app (Android) with this file's direct download link, so 1DM
+// downloads it with its own multi-connection engine. /dl/... sends the file
+// as an attachment with the real filename and supports Range requests.
+const DM_PKGS = {
+  free: 'idm.internet.download.manager',
+  plus: 'idm.internet.download.manager.plus',
+  lite: 'idm.internet.download.manager.adm.lite'
+};
+function dlUrl() {
+  return (/^https?:\/\//.test(BASE_URL_JS) ? BASE_URL_JS : 'https://' + BASE_URL_JS)
+    + '/dl/' + SHORT_CODE + '/' + encodeURIComponent(FILENAME);
+}
+function copyText(text, msg) {
+  (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject())
+    .then(() => toast(msg)).catch(() => { prompt('Copy this link:', text); });
+}
+function dm1Copy() { copyText(dlUrl(), 'Download link copied. Paste it in 1DM'); }
+function dm1Open(variant) {
+  const url = dlUrl();
+  if (!/Android/i.test(navigator.userAgent)) { dm1Copy(); return; }   // iPhone / PC: no 1DM intent
+  const p = $('player'); if (p && p.pause) p.pause();
+  const u = new URL(url);
+  let left = false;
+  const gone = () => { left = true; };
+  document.addEventListener('visibilitychange', gone, { once: true });
+  window.addEventListener('pagehide', gone, { once: true });
+  location.href = 'intent://' + u.host + u.pathname + '#Intent;scheme=' + u.protocol.slice(0, -1) +
+    ';action=android.intent.action.VIEW;package=' + DM_PKGS[variant || 'free'] + ';end';
+  // Still on this page after 2s = the app didn't open -> copy the link instead.
+  setTimeout(() => { document.removeEventListener('visibilitychange', gone);
+    if (!left && !document.hidden) copyText(url, '1DM did not open. Link copied, paste it in 1DM'); }, 2000);
 }
 
 // ── Server status ─────────────────────────────────────────────────────────
