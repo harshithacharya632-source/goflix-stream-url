@@ -322,15 +322,20 @@ function drawSpark() {
   const pts = hist.map((v, i) => (i * 120 / (hist.length - 1)).toFixed(1) + ',' + (28 - Math.min(v, 100) / 100 * 26).toFixed(1)).join(' ');
   $('spark-line').setAttribute('points', pts); $('spark-fill').setAttribute('points', '0,30 ' + pts + ' 120,30');
 }
+let loadTick = 0;
 async function refreshLoad() {
-  if (document.hidden || document.documentElement.classList.contains('fsmode') || document.documentElement.classList.contains('vplay')) return;
+  const root = document.documentElement;
+  if (document.hidden || root.classList.contains('fsmode')) return;
+  // While a video plays, still refresh -- but only every 3rd tick (15 s): one tiny request, so the
+  // gauges don't freeze on an old number, and nothing competes with the video.
+  if (root.classList.contains('vplay') && (loadTick++ % 3) !== 0) return;
   try {
     const d = await (await fetch('/api/load', { cache: 'no-store' })).json();
-    setMeter('cpu', d.cpu);
+    if (d.cpu != null) { setMeter('cpu', d.cpu); hist.push(d.cpu); if (hist.length > 30) hist.shift(); drawSpark(); }
+    else $('cpu-val').textContent = 'n/a';
     if (d.mem != null) setMeter('mem', d.mem); else $('mem-val').textContent = 'n/a';
     $('streams-val').textContent = d.watching != null ? d.watching : d.streams;
-    hist.push(d.cpu); if (hist.length > 30) hist.shift(); drawSpark();
-    const lv = level(Math.max(d.cpu, d.mem || 0));
+    const lv = level(Math.max(d.cpu || 0, d.mem || 0));
     $('load-tag').textContent = lv === 'high' ? 'Heavy' : lv === 'mid' ? 'Moderate' : 'Low';
     $('load-tag').className = 'load-tag ' + lv;
     $('pill').classList.remove('off'); $('pill-text').textContent = 'LIVE';
