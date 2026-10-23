@@ -1,114 +1,217 @@
-import math
+import asyncio
+import logging
+import os as _os
+import time
+from collections import OrderedDict, deque
+
 from telethon import TelegramClient
 from telethon.tl.types import Document, Photo
 from telethon.errors import FloodWaitError
 from fastapi import Request, HTTPException
 from fastapi.responses import StreamingResponse, Response
-import logging
 
 logger = logging.getLogger(__name__)
 
 CHUNK = 1024 * 1024  # Telegram's max request size
 
-import os as _os
-PER_CLIENT = max(1, int(_os.environ.get("STREAM_PARALLEL", "8")))   # parallel downloads per Telegram account
-MAX_WINDOW = max(2, int(_os.environ.get("STREAM_WINDOW", "24")))    # MB buffered ahead per viewer
-_sems = {}  # one limit per Telegram client, shared by ALL viewers (keeps Telegram from throttling us)
+PER_CLIENT = max(1, int(_os.environ.get("STREAM_PARALLEL", "8")))        # parallel downloads per Telegram account
+MAX_WINDOW = max(2, int(_os.environ.get("STREAM_WINDOW", "24")))         # most MB buffered ahead per viewer
+START_WINDOW = max(1, int(_os.environ.get("STREAM_START_WINDOW", "6")))  # MB a NEW request asks for at first
+CACHE_BYTES = max(0, int(_os.environ.get("STREAM_CACHE_MB", "64"))) * 1024 * 1024  # 0 = no chunk cache
+
+_sems = {}         # one limit per Telegram client, shared by ALL viewers (keeps Telegram from throttling us)
+_flood_until = {}  # id(client) -> time.monotonic() when its FloodWait ends
+_cache = OrderedDict()   # (file id, chunk size, chunk no.) -> bytes   recently downloaded chunks (LRU)
+_cache_size = 0
+_slots = {}        # same key -> _Slot   chunks that are downloading RIGHT NOW
 
 
 def _sem(client):
-    import asyncio
     s = _sems.get(id(client))
     if s is None:
         s = _sems[id(client)] = asyncio.Semaphore(PER_CLIENT)
     return s
 
 
-async def ultra_high_speed_streamer(clients: list, file, start: int, end: int, chunk_size: int = CHUNK):
-    """
-    Stream bytes [start, end] of a Telegram file in order, as fast as possible.
+def _cache_put(key, data):
+    global _cache_size
+    if not CACHE_BYTES or len(data) > CACHE_BYTES:
+        return
+    old = _cache.pop(key, None)
+    if old is not None:
+        _cache_size -= len(old)
+    _cache[key] = data
+    _cache_size += len(data)
+    while _cache_size > CACHE_BYTES and _cache:
+        _, gone = _cache.popitem(last=False)
+        _cache_size -= len(gone)
 
-    - Many 1 MB chunks are downloaded IN PARALLEL (spread over every Telegram
-      connection) and handed out in order, so the player gets data as fast as
-      the connection allows instead of one slow round trip at a time.
-    - `file` may be a list with one file handle per client (each Telegram account
-      has its own handle for the same file).
-    - Chunks are requested on 1 MB boundaries (Telegram's rule), then the
-      first/last one is trimmed, so seeking to any byte works.
-    - Only a small window of chunks is kept ahead, so a slow phone can't make the
-      server run out of memory.
-    """
-    import asyncio
-    from collections import deque
 
+class _Slot:
+    """One chunk being downloaded. Every request that wants this chunk shares the
+    same download; it is only cancelled when the LAST request that wanted it leaves."""
+    __slots__ = ("task", "refs")
+
+    def __init__(self, task):
+        self.task = task
+        self.refs = 1
+
+
+def _want(key, make):
+    """Get chunk `key`: from the cache, from a download already running (shared), or start one.
+    Returns (awaitable, slot). Call _drop(key, slot) when this request no longer needs it."""
+    data = _cache.get(key)
+    if data is not None:
+        _cache.move_to_end(key)
+        fut = asyncio.get_running_loop().create_future()
+        fut.set_result(data)
+        return fut, None
+    slot = _slots.get(key)
+    if slot is not None and slot.task.done() and (slot.task.cancelled() or slot.task.exception()):
+        slot = None   # a dead download must not be handed to a new request
+    if slot is None:
+        task = asyncio.ensure_future(make())
+        slot = _slots[key] = _Slot(task)
+
+        def _finished(t, key=key, slot=slot):
+            if _slots.get(key) is slot:
+                del _slots[key]
+            if not t.cancelled():
+                t.exception()   # mark as retrieved so asyncio doesn't log "never retrieved"
+        task.add_done_callback(_finished)
+    else:
+        slot.refs += 1
+    return slot.task, slot
+
+
+def _drop(key, slot):
+    if slot is None:
+        return
+    slot.refs -= 1
+    if slot.refs <= 0 and not slot.task.done():
+        if _slots.get(key) is slot:
+            del _slots[key]   # forget it NOW so a new request can't pick up a task that is being cancelled
+        slot.task.cancel()
+
+
+def _pick(clients, base):
+    """Choose a Telegram connection that is not rate-limited right now.
+    Returns (index, seconds_to_wait_first)."""
+    n, now = len(clients), time.monotonic()
+    for k in range(n):
+        ci = (base + k) % n
+        if _flood_until.get(id(clients[ci]), 0) <= now:
+            return ci, 0.0
+    ci = min(range(n), key=lambda i: _flood_until.get(id(clients[i]), 0))   # all limited: wait for the first to free up
+    return ci, max(0.0, _flood_until[id(clients[ci])] - now)
+
+
+async def ultra_high_speed_streamer(clients: list, file, start: int, end: int, chunk_size: int = CHUNK,
+                                    file_size: int = None):
+    """
+    Stream bytes [start, end] of a Telegram file in order.
+
+    Why a browser stutters where VLC does not: VLC opens ONE request and reads it
+    straight through. A browser opens several -- the start, the end of the file
+    (index / moov atom), the resume position, then more every time you seek -- and
+    drops them again. If each of those fired a big burst of downloads at Telegram,
+    the burst of a request that was already abandoned kept the connection busy and
+    the request the player actually needed waited in line behind it. So:
+
+    - A new request starts with a SMALL burst (START_WINDOW chunks) and doubles it
+      while the reader is really waiting on the download, up to MAX_WINDOW. Full
+      speed is reached after a couple of chunks, but a request the browser drops
+      early has asked Telegram for far less than before (6 chunks, not 16).
+    - A chunk that is being downloaded is SHARED by every request that wants it,
+      and downloaded chunks are kept in a small LRU cache. The browser's repeated
+      requests for the same part of the file (start, end, a little rewind) cost
+      nothing and never download anything twice.
+    - A chunk is cancelled the moment the last request that wanted it goes away.
+    - Chunks are requested on 1 MB boundaries (Telegram's rule), the first/last is
+      trimmed, so seeking to any byte works. `file` may be a list with one handle per
+      client (each Telegram account has its own handle for the same file).
+    """
     n = len(clients)
     files = list(file) if isinstance(file, (list, tuple)) else [file] * n
-    window = min(2 * PER_CLIENT * n, MAX_WINDOW)   # chunks downloading or waiting to be sent
+    cap = max(2, min(2 * PER_CLIENT * n, MAX_WINDOW))   # most chunks downloading or waiting to be sent
+    win = min(cap, START_WINDOW)
+    fid = getattr(files[0], "id", None)                 # Telegram's file id: identical for every account
+    if fid is None:
+        fid = object()                                  # unknown file: never share anything with other requests
     aligned = start - (start % chunk_size)
 
-    async def fetch(i: int, pos: int) -> bytes:
-        need = min(chunk_size, end + 1 - pos)
+    async def download(key, idx: int, pos: int) -> bytes:
+        total = file_size if file_size else end + 1
+        need = min(chunk_size, total - pos)
         last_err = None
-        for attempt in range(4):
-            ci = (i + attempt) % n   # a retry goes to the next connection
+        for attempt in range(5):
+            ci, delay = _pick(clients, idx + attempt)    # a retry goes to another connection
+            if delay:
+                await asyncio.sleep(min(delay, 30))
             try:
                 async with _sem(clients[ci]):
-                    buf = bytearray()
+                    parts = []
                     # limit=1 -> exactly one chunk (Telethon's limit counts chunks, not bytes)
                     async for part in clients[ci].iter_download(
                             files[ci], offset=pos, limit=1, chunk_size=chunk_size, request_size=chunk_size):
-                        buf += part
-                if len(buf) >= need:
-                    return bytes(buf)
-                last_err = IOError(f"short chunk at {pos}: {len(buf)}/{need}")
+                        parts.append(part)
+                data = parts[0] if len(parts) == 1 else b"".join(parts)
+                if len(data) >= need:
+                    if not isinstance(data, bytes):
+                        data = bytes(data)
+                    if file_size and len(data) == min(chunk_size, file_size - pos):
+                        _cache_put(key, data)            # only COMPLETE chunks are worth keeping
+                    return data
+                last_err = IOError(f"short chunk at {pos}: {len(data)}/{need}")
             except FloodWaitError as ex:
-                # Telegram is rate-limiting this account -- almost always from
-                # firing PER_CLIENT concurrent requests on a single connection
-                # right after a seek. Previously this fell into the generic
-                # except below and only waited ~0.3-1.2s total before giving
-                # up, which is far shorter than a real FloodWait, so it kept
-                # re-hitting the limit in a tight loop until it happened to
-                # clear on its own -- that's what made a seek feel like it
-                # took up to a minute to recover. Wait the actual time
-                # Telegram asks for instead (capped so one slow chunk can't
-                # hang the whole stream indefinitely).
+                # Telegram is rate-limiting this account. Park it and let the retry use
+                # another account straight away; with only one account _pick() waits out
+                # the real time Telegram asked for (capped so one chunk can't hang forever).
                 last_err = ex
-                wait_for = min(ex.seconds, 30)
-                logger.warning(f"FloodWait {ex.seconds}s on client {ci} at offset {pos} -- waiting {wait_for}s.")
-                await asyncio.sleep(wait_for)
+                _flood_until[id(clients[ci])] = time.monotonic() + ex.seconds
+                logger.warning(f"FloodWait {ex.seconds}s on client {ci} at offset {pos}")
                 continue
             except Exception as ex:  # CancelledError is not an Exception, so it passes through
                 last_err = ex
             await asyncio.sleep(0.3 * (attempt + 1))
         raise last_err
 
-    positions = iter(enumerate(range(aligned, end + 1, chunk_size)))
-    tasks = deque()
+    positions = iter(range(aligned, end + 1, chunk_size))
+    pending = deque()   # (pos, key, slot, awaitable) in file order
 
     def fill():
-        while len(tasks) < window:
-            nxt = next(positions, None)
-            if nxt is None:
+        while len(pending) < win:
+            pos = next(positions, None)
+            if pos is None:
                 return
-            i, pos = nxt
-            tasks.append((pos, asyncio.ensure_future(fetch(i, pos))))
+            idx = pos // chunk_size
+            key = (fid, chunk_size, idx)
+            fut, slot = _want(key, lambda key=key, idx=idx, pos=pos: download(key, idx, pos))
+            pending.append((pos, key, slot, fut))
 
     sent = 0
     try:
         fill()
-        while tasks:
-            pos, task = tasks.popleft()
-            data = await task
+        while pending:
+            pos, key, slot, fut = pending.popleft()
+            waited = not fut.done()
+            try:
+                data = await asyncio.shield(fut)   # shield: cancelling THIS request must not kill a download others share
+            finally:
+                _drop(key, slot)
+            if waited and win < cap:
+                win = min(cap, win * 2)
             fill()
             lo = max(start, pos) - pos
             hi = min(end + 1, pos + len(data)) - pos
             if hi > lo:
-                yield data[lo:hi]
+                yield data if (lo == 0 and hi == len(data)) else data[lo:hi]
                 sent += hi - lo
     finally:
-        for _, task in tasks:
-            task.cancel()
-        logger.info(f"Stream closed after {sent / 1048576:.1f} MB")
+        for _, key, slot, _ in pending:
+            _drop(key, slot)
+        logger.info(f"Stream closed after {sent / 1048576:.1f} MB (window {win}/{cap})")
+
 
 async def media_streamer(clients: list[TelegramClient], file, start: int, end: int):
     """
@@ -202,6 +305,23 @@ def _content_disposition(filename: str, inline: bool) -> str:
     return f"{'inline' if inline else 'attachment'}; filename=\"{ascii_name}\"; filename*=UTF-8\'\'{quote(filename)}"
 
 
+class _ClosingStreamingResponse(StreamingResponse):
+    """StreamingResponse that closes the body generator the moment the client goes away,
+    so the Telegram downloads it started are cancelled immediately (not whenever the
+    garbage collector gets round to it)."""
+
+    async def __call__(self, scope, receive, send):
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            aclose = getattr(self.body_iterator, "aclose", None)
+            if aclose:
+                try:
+                    await aclose()
+                except Exception:
+                    pass
+
+
 async def get_streaming_response(clients: list[TelegramClient], file, file_size: int, filename: str, mime_type: str, request: Request, inline: bool = False):
     rng = get_range_header(request, file_size)
     if rng is None:
@@ -220,9 +340,10 @@ async def get_streaming_response(clients: list[TelegramClient], file, file_size:
     partial = bool(request.headers.get("Range"))
     if partial:
         headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
+    logger.info(f"Stream open {start}-{end} of {file_size} ({request.headers.get('Range') or 'no Range header'})")
 
-    return StreamingResponse(
-        ultra_high_speed_streamer(clients, file, start, end),
+    return _ClosingStreamingResponse(
+        ultra_high_speed_streamer(clients, file, start, end, file_size=file_size),
         status_code=206 if partial else 200,
         headers=headers
     )
