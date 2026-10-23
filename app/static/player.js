@@ -29,10 +29,17 @@ const showCtl = () => { pb.classList.remove('hide'); clearTimeout(hideT);
   if (!v.paused) hideT = setTimeout(() => pb.classList.add('hide'), 4500); };
 const hideNow = () => { clearTimeout(hideT); pb.classList.add('hide'); };
 const toggleCtl = () => (pb.classList.contains('hide') || v.paused) ? showCtl() : hideNow();
-const toggle = () => v.paused ? v.play().catch(() => {}) : v.pause();
+let guard = false;   // true while the stall guard (see "smooth playback" below) is buffering
+const uiPlay = () => { pb.classList.add('playing'); $('pp').innerHTML = IC.pause; showCtl(); };
+const uiPause = () => { pb.classList.remove('playing'); $('pp').innerHTML = IC.play; showCtl(); };
+// Tapping while the guard is buffering means "pause" (the video is already paused underneath).
+const toggle = () => { if (guard) { endGuard(false); uiPause(); return; } v.paused ? v.play().catch(() => {}) : v.pause(); };
 $('pp').onclick = $('big').onclick = e => { e.stopPropagation(); toggle(); showCtl(); };
-v.addEventListener('play', () => { pb.classList.add('playing'); $('pp').innerHTML = IC.pause; showCtl(); });
-v.addEventListener('pause', () => { pb.classList.remove('playing'); $('pp').innerHTML = IC.play; showCtl(); });
+v.addEventListener('play', uiPlay);
+v.addEventListener('pause', () => { if (!guard) uiPause(); });
+// Lets the page stop its decorative animations / polling while a video plays (see watch.html).
+v.addEventListener('playing', () => document.documentElement.classList.add('vplay'));
+['pause', 'ended', 'emptied', 'error'].forEach(e => v.addEventListener(e, () => document.documentElement.classList.remove('vplay')));
 
 // ── progress line (played + buffered) ───────────────────────────────────
 function paint() {
@@ -132,14 +139,58 @@ addEventListener('keydown', e => { if (/INPUT|TEXTAREA/.test(e.target.tagName)) 
 // Shows after a short delay instead of instantly, and any sign of real
 // progress (timeupdate) cancels it -- so a brief, harmless network blip
 // doesn't flash "Loading stream..." on top of video that's actually fine.
-// Previously ANY 'waiting'/'seeking' event showed it immediately with no
-// debounce, which is what made it feel like it was always loading.
-const sp = $('buffering');
+const sp = $('buffering'), spTxt = sp.querySelector('span'), SP_TXT = spTxt.textContent;
 let bufT = null;
 function showBuf() { clearTimeout(bufT); bufT = setTimeout(() => sp.classList.add('show'), 350); }
-function hideBuf() { clearTimeout(bufT); sp.classList.remove('show'); }
+function hideBuf() { if (guard) return; clearTimeout(bufT); sp.classList.remove('show'); }
 ['loadstart', 'waiting', 'seeking'].forEach(e => v.addEventListener(e, showBuf));
 ['playing', 'canplay', 'error', 'pause', 'timeupdate'].forEach(e => v.addEventListener(e, hideBuf));
+
+// ── smooth playback: buffer a cushion instead of stop-start stuttering ──
+// A browser resumes playing the instant it has a frame or two, so on a link that is
+// only just fast enough it plays 1s, stalls, plays 1s, stalls ("stuck, stuck").
+// VLC doesn't, because it keeps a big read-ahead. So when the video runs dry we pause
+// ourselves and resume only once a real cushion is buffered: one short wait, then smooth.
+// The cushion grows (5s -> 8s -> 11s -> 14s) if stalls keep happening, and we never wait
+// forever: we also resume when the browser stops buffering further, or after 20s.
+const bufAhead = () => { const t = v.currentTime;
+  for (let i = 0; i < v.buffered.length; i++) if (v.buffered.start(i) <= t + 0.3 && v.buffered.end(i) > t) return v.buffered.end(i) - t;
+  return 0; };
+let stalls = 0, lastStall = 0, gTimer = 0, gStart = 0, gBest = 0, gGrow = 0;
+const cushion = () => Math.min(15, 5 + 3 * Math.min(stalls - 1, 3));
+function startGuard() {
+  if (guard || v.paused || v.seeking || v.ended) return;
+  const now = Date.now(); if (now - lastStall > 90000) stalls = 0;
+  stalls++; lastStall = now;
+  guard = true; gStart = gGrow = now; gBest = bufAhead();
+  v.pause();                                  // the 'pause' listener ignores this one, the UI keeps showing "playing"
+  clearTimeout(bufT); sp.classList.add('show');
+  spTxt.textContent = 'Buffering ' + Math.floor(Math.min(gBest, cushion())) + 's / ' + cushion() + 's';
+  gTimer = setInterval(checkGuard, 400);
+}
+function checkGuard() {
+  const now = Date.now(), ahead = bufAhead(), want = cushion(), left = (v.duration || 1e9) - v.currentTime;
+  if (ahead > gBest + 0.25) { gBest = ahead; gGrow = now; }
+  spTxt.textContent = 'Buffering ' + Math.floor(Math.min(ahead, want)) + 's / ' + want + 's';
+  if (ahead >= want || ahead >= left - 0.5 || (ahead >= 3 && now - gGrow > 2500) || now - gStart > 20000) endGuard(true);
+}
+function endGuard(resume) {
+  clearInterval(gTimer); guard = false; spTxt.textContent = SP_TXT; sp.classList.remove('show');
+  if (resume) v.play().catch(uiPause);        // if the browser refuses, show the normal play button
+}
+v.addEventListener('waiting', startGuard);
+v.addEventListener('error', () => { if (guard) endGuard(false); });
+
+// Add ?debug=1 to the watch page URL to see live numbers on the video: how many seconds
+// are buffered ahead, how often it stalled, and how many frames the device failed to draw.
+if (/[?&]debug=1\b/.test(location.search)) {
+  const d = document.createElement('div');
+  d.style.cssText = 'position:absolute;right:8px;top:8px;z-index:20;font:11px/1.4 monospace;background:rgba(0,0,0,.78);color:#7CFC9A;padding:6px 8px;border-radius:6px;pointer-events:none;white-space:pre';
+  pb.appendChild(d);
+  setInterval(() => { const q = v.getVideoPlaybackQuality ? v.getVideoPlaybackQuality() : {};
+    d.textContent = 'buffered ahead ' + bufAhead().toFixed(1) + 's\nstalls ' + stalls + '   ready ' + v.readyState +
+      '\ndropped frames ' + (q.droppedVideoFrames || 0) + ' / ' + (q.totalVideoFrames || 0) + '\n' + v.videoWidth + 'x' + v.videoHeight; }, 500);
+}
 
 // ── can't-play / no-audio → point to VLC ────────────────────────────────
 const warn = $('warn');
