@@ -7,6 +7,7 @@ from app.database.connection import settings
 from app.streamer.manager import session_manager
 from app.streamer.engine import get_streaming_response, get_remux_response
 from app.streamer.probe import probe_tracks
+from app.utils.cpu import cpu_sampler
 from fastapi.middleware.gzip import GZipMiddleware
 import uvicorn
 import asyncio
@@ -22,6 +23,10 @@ if sys.platform == 'win32':
 
 # Configure Logging
 logging.basicConfig(level=logging.INFO)
+# Telethon logs one INFO line for EVERY chunk it downloads ("Starting ... file download in chunks
+# of ..."). That is thousands of lines per movie: it buries the useful lines in the Koyeb log and
+# costs CPU. Warnings and errors are still shown.
+logging.getLogger("telethon").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 from contextlib import asynccontextmanager
@@ -30,9 +35,11 @@ from contextlib import asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup logic -- just the Telegram client(s), no bot commands, no DB.
     await session_manager.start()
+    cpu_sampler.start()
     logger.info("Application started")
     yield
     # Shutdown logic
+    cpu_sampler.stop()
     await session_manager.stop()
     logger.info("Application stopped")
 
@@ -228,13 +235,16 @@ def _watching_now():
 
 @app.get("/api/load")
 async def server_load():
-    try:
-        cpu = os.getloadavg()[0] / (os.cpu_count() or 1) * 100
-    except (OSError, AttributeError):
-        cpu = 0.0
+    # Real CPU use over the last few seconds (see app/utils/cpu.py). Open /api/load in a browser
+    # to check "cpu_src" -- it says which measurement this server is using.
+    cpu = cpu_sampler.percent
+    if cpu is None:   # first second after start-up
+        cpu_sampler.sample()
+        cpu = cpu_sampler.percent
     return JSONResponse(
         {
-            "cpu": round(min(cpu, 100), 1),
+            "cpu": cpu,
+            "cpu_src": cpu_sampler.source,
             "mem": _mem_percent(),
             "streams": _active_streams,
             "watching": _watching_now(),
