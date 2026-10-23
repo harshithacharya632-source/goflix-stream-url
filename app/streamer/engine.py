@@ -12,12 +12,19 @@ from fastapi.responses import StreamingResponse, Response
 
 logger = logging.getLogger(__name__)
 
-CHUNK = 1024 * 1024  # Telegram's max request size
+_MB = 1024 * 1024
 
-PER_CLIENT = max(1, int(_os.environ.get("STREAM_PARALLEL", "8")))        # parallel downloads per Telegram account
-MAX_WINDOW = max(2, int(_os.environ.get("STREAM_WINDOW", "24")))         # most MB buffered ahead per viewer
-START_WINDOW = max(1, int(_os.environ.get("STREAM_START_WINDOW", "6")))  # MB a NEW request asks for at first
-CACHE_BYTES = max(0, int(_os.environ.get("STREAM_CACHE_MB", "64"))) * 1024 * 1024  # 0 = no chunk cache
+# Telethon never sends more than 512 KB in one request (its MAX_CHUNK_SIZE). Asking for 1 MB
+# chunks looked right but made Telethon quietly split EVERY chunk into two requests sent one
+# after the other (the "Starting indirect file download in chunks of 524288 ... stride 1048576"
+# lines in the log): twice the waiting per chunk, plus extra CPU copying bytes. With 512 KB chunks
+# each chunk is exactly one request ("Starting direct file download").
+CHUNK = 512 * 1024
+
+PER_CLIENT = max(1, int(_os.environ.get("STREAM_PARALLEL", "16")))   # requests in flight per Telegram account (1 request = 1 chunk)
+MAX_WINDOW = max(2, int(_os.environ.get("STREAM_WINDOW", "24")) * _MB // CHUNK)        # most chunks buffered ahead per viewer (env value is in MB)
+START_WINDOW = max(1, int(_os.environ.get("STREAM_START_WINDOW", "6")) * _MB // CHUNK) # chunks a NEW request asks for at first (env value is in MB)
+CACHE_BYTES = max(0, int(_os.environ.get("STREAM_CACHE_MB", "64"))) * _MB  # 0 = no chunk cache
 
 _sems = {}         # one limit per Telegram client, shared by ALL viewers (keeps Telegram from throttling us)
 _flood_until = {}  # id(client) -> time.monotonic() when its FloodWait ends
@@ -121,17 +128,18 @@ async def ultra_high_speed_streamer(clients: list, file, start: int, end: int, c
     - A new request starts with a SMALL burst (START_WINDOW chunks) and doubles it
       while the reader is really waiting on the download, up to MAX_WINDOW. Full
       speed is reached after a couple of chunks, but a request the browser drops
-      early has asked Telegram for far less than before (6 chunks, not 16).
+      early has asked Telegram for far less than before (a few MB, not a big burst).
     - A chunk that is being downloaded is SHARED by every request that wants it,
       and downloaded chunks are kept in a small LRU cache. The browser's repeated
       requests for the same part of the file (start, end, a little rewind) cost
       nothing and never download anything twice.
     - A chunk is cancelled the moment the last request that wanted it goes away.
-    - Chunks are requested on 1 MB boundaries (Telegram's rule), the first/last is
+    - Chunks are requested on 512 KB boundaries (never crossing Telegram's 1 MB line), the first/last is
       trimmed, so seeking to any byte works. `file` may be a list with one handle per
       client (each Telegram account has its own handle for the same file).
     """
     n = len(clients)
+    chunk_size = min(chunk_size, CHUNK)                 # a bigger value silently makes Telethon download twice as slowly
     files = list(file) if isinstance(file, (list, tuple)) else [file] * n
     cap = max(2, min(2 * PER_CLIENT * n, MAX_WINDOW))   # most chunks downloading or waiting to be sent
     win = min(cap, START_WINDOW)
@@ -190,6 +198,8 @@ async def ultra_high_speed_streamer(clients: list, file, start: int, end: int, c
             pending.append((pos, key, slot, fut))
 
     sent = 0
+    t0 = time.monotonic()
+    first_byte = None
     try:
         fill()
         while pending:
@@ -205,12 +215,18 @@ async def ultra_high_speed_streamer(clients: list, file, start: int, end: int, c
             lo = max(start, pos) - pos
             hi = min(end + 1, pos + len(data)) - pos
             if hi > lo:
+                if first_byte is None:
+                    first_byte = time.monotonic() - t0
                 yield data if (lo == 0 and hi == len(data)) else data[lo:hi]
                 sent += hi - lo
     finally:
         for _, key, slot, _ in pending:
             _drop(key, slot)
-        logger.info(f"Stream closed after {sent / 1048576:.1f} MB (window {win}/{cap})")
+        dt = max(time.monotonic() - t0, 0.001)
+        fb = f"{first_byte:.2f}s" if first_byte is not None else "none"
+        # Compare MB/s with the video's bitrate: if it is lower, the player WILL stall.
+        logger.info(f"Stream closed after {sent / _MB:.1f} MB in {dt:.1f}s "
+                    f"({sent / _MB / dt:.1f} MB/s, first byte {fb}, window {win}/{cap})")
 
 
 async def media_streamer(clients: list[TelegramClient], file, start: int, end: int):
