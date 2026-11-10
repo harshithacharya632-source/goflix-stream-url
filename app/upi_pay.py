@@ -9,8 +9,9 @@ then in app/main.py add these two lines RIGHT AFTER  app = FastAPI(...)  and BEF
 
 Environment variables on the stream service
 -------------------------------------------
-UPI_ID           same UPI id the bot uses, e.g. name@okaxis        (required)
-UPI_PAYEE_NAME   shown in the UPI app, default "Goflix"             (optional)
+UPI_ID           NOT needed any more for the app buttons: the bot puts its own UPI id + name inside every
+UPI_PAYEE_NAME   signed link (UPI_ID / UPI_PAYEE_NAME in the bot's info.py), so change them there only.
+                 They are only used as a fallback for OLD messages whose link has no payee in it.
 GOFLIX_BOT_TOKEN the token of the main Goflix bot (the one that sends the QR / pay buttons)
   or PAY_SECRET  64-hex key derived from that token (keeps the token itself off this server)
 
@@ -22,7 +23,7 @@ Get PAY_SECRET by running, anywhere:   python upi_pay.py "<Goflix bot token>"
 How the buttons behave
 -----------------------
 Telegram only allows https:// links on buttons, so a tap always hits this server first.
-* Android + a specific app (PhonePe/GPay/Paytm/Navi): instant HTTP redirect straight into
+* Android + a specific app (PhonePe/GPay/Paytm/Navi/Amazon Pay): instant HTTP redirect straight into
   that app, no page shown. If the app isn't installed, Chrome lands on the page below
   instead (with a short "couldn't open it" note and the other app buttons).
 * iPhone: a tiny page that opens the app by itself (plus buttons as a backup).
@@ -34,9 +35,9 @@ Two kinds of pages
                          the app shows no payment-link warning); the user then taps Scan QR in the app and scans the QR by hand.
 /pay                   - signed payment links (amount + payee pre-filled). Still works for older messages.
 
-The bot signs every /pay link (amount + note) with that key. This page refuses anything
-whose signature doesn't match, and the payee is ALWAYS the UPI_ID from this server's
-environment, so the page can't be used to send money anywhere else or to change the amount.
+The bot signs every /pay link (amount + note + payee UPI id + payee name) with that key. This page
+refuses anything whose signature doesn't match, so it can't be used to send money anywhere else or
+to change the amount. Older links (no payee inside) still work and use UPI_ID from this server's environment.
 """
 import hashlib
 import hmac
@@ -94,7 +95,7 @@ _SECRET = _load_secret()
 
 
 def pay_enabled() -> bool:
-    return bool(_SECRET and UPI_ID and _VPA_RE.match(UPI_ID))
+    return bool(_SECRET)
 
 
 def format_amount(amount) -> str:
@@ -122,10 +123,35 @@ def verify_pay_sig(amount, note: str, sig: str) -> bool:
         return False
 
 
+def sign_payee(amount, note: str, pa: str, pn: str) -> str:
+    msg = f"payee|{format_amount(amount)}|{note}|{pa}|{pn}".encode()
+    return hmac.new(_SECRET, msg, hashlib.sha256).hexdigest()[:24]
+
+
+def resolve_payee(amount, note: str, sig: str, pa: str = "", pn: str = "", ps: str = ""):
+    """-> (upi_id, payee_name) to pay, or None when the link must be refused.
+    New links carry the payee (signed by the bot) - that always wins, so a stale UPI_ID on this server can
+    never be used. Old links (no pa) are checked the old way and use this server's UPI_ID."""
+    if not _SECRET:
+        return None
+    try:
+        if pa:
+            if not _VPA_RE.match(pa) or len(pn) > 60:
+                return None
+            if not hmac.compare_digest(sign_payee(amount, note, pa, pn), ps or ""):
+                return None
+            return pa, (pn or "Goflix")
+        if verify_pay_sig(amount, note, sig) and UPI_ID and _VPA_RE.match(UPI_ID):
+            return UPI_ID, (UPI_PAYEE_NAME or "Goflix")
+    except ValueError:
+        pass
+    return None
+
+
 # ───────────────────────────── page rendering (same as the bot's) ─────────────────────────────
-def build_upi_query(amount, note: str = "") -> str:
-    """pa=<id>&pn=<name>&am=<amount>&cu=INR&tn=<note>   (the part after upi://pay?)"""
-    params = [("pa", UPI_ID), ("pn", UPI_PAYEE_NAME or "Goflix"), ("am", format_amount(amount)), ("cu", "INR")]
+def build_upi_query(amount, note: str = "", pa: str = None, pn: str = None) -> str:
+    """pa=<id>&pn=<n>&am=<amount>&cu=INR&tn=<note>   (the part after upi://pay?)"""
+    params = [("pa", pa or UPI_ID), ("pn", pn or UPI_PAYEE_NAME or "Goflix"), ("am", format_amount(amount)), ("cu", "INR")]
     if note:
         params.append(("tn", note[:50]))
     return "&".join(f"{k}={quote(v, safe='@.-_')}" for k, v in params)
@@ -150,9 +176,10 @@ def app_url(app_key: str, platform: str, query: str, fallback: str = None) -> st
     return f"upi://pay?{query}"
 
 
-def render_pay_page(amount, note: str, app_key: str = None, user_agent: str = "", failed: bool = False) -> str:
+def render_pay_page(amount, note: str, app_key: str = None, user_agent: str = "", failed: bool = False,
+                    pa: str = None, pn: str = None) -> str:
     amt = format_amount(amount)
-    query = build_upi_query(amt, note)
+    query = build_upi_query(amt, note, pa, pn)
     platform = detect_platform(user_agent)
     list_mode = app_key not in UPI_APPS            # "Other UPI apps": no app chosen -> show them all
     # iPhone can only open apps that have their own URL scheme; the rest would all open the same generic link
@@ -312,17 +339,22 @@ async def upi_pay_page(
     sig: str = Query(""),
     app: str = Query(""),
     nr: str = Query(""),          # "1" = we already tried the app and it didn't open
+    pa: str = Query(""),          # payee UPI id  } put in the link by the bot and covered by ps,
+    pn: str = Query(""),          # payee name    } so this server needs no UPI_ID of its own
+    ps: str = Query(""),          # signature over amount + note + pa + pn
 ):
-    if not pay_enabled() or not verify_pay_sig(am, tn, sig):
+    payee = resolve_payee(am, tn, sig, pa, pn, ps) if pay_enabled() else None
+    if payee is None:
         raise HTTPException(status_code=404, detail="Not Found")
+    pay_id, pay_name = payee
     ua = request.headers.get("user-agent", "")
     headers = {"Cache-Control": "no-store"}
     try:
         # Android + chosen app: jump straight into the app, no page in between.
         if request.method == "GET" and not nr and app in UPI_APPS and detect_platform(ua) == "android":
-            target = app_url(app, "android", build_upi_query(am, tn), fallback=_self_url(request, nr="1"))
+            target = app_url(app, "android", build_upi_query(am, tn, pay_id, pay_name), fallback=_self_url(request, nr="1"))
             return RedirectResponse(target, status_code=302, headers=headers)
-        page = render_pay_page(am, tn, app, ua, failed=bool(nr))
+        page = render_pay_page(am, tn, app, ua, failed=bool(nr), pa=pay_id, pn=pay_name)
     except ValueError:
         raise HTTPException(status_code=404, detail="Not Found")
     return HTMLResponse(page, headers=headers)
@@ -349,7 +381,8 @@ async def upi_open_app(request: Request, app_key: str, failed: str = Query("")):
 
 
 @router.get("/pay/check", include_in_schema=False)
-async def upi_pay_check(am: str = Query(""), tn: str = Query(""), sig: str = Query("")):
+async def upi_pay_check(am: str = Query(""), tn: str = Query(""), sig: str = Query(""),
+                        pa: str = Query(""), pn: str = Query(""), ps: str = Query("")):
     """Diagnostics only: says WHY /pay answers 404. Shows no secrets. Safe to delete later."""
     if _PAY_SECRET:
         secret = "ok (from PAY_SECRET)" if _SECRET else "PAY_SECRET is set but is not a valid 64-hex value"
@@ -359,14 +392,15 @@ async def upi_pay_check(am: str = Query(""), tn: str = Query(""), sig: str = Que
         secret = "MISSING - add GOFLIX_BOT_TOKEN to this service"
     if not _SECRET:
         signature = "cannot check: no signing secret on this server"
-    elif not (am and sig):
-        signature = "not checked (add am=, tn=, sig= from the button link)"
+    elif not (am and (sig or ps)):
+        signature = "not checked (add am=, tn=, sig=, pa=, pn=, ps= from the button link)"
     else:
-        signature = "match" if verify_pay_sig(am, tn, sig) else \
+        signature = "match" if resolve_payee(am, tn, sig, pa, pn, ps) else \
             "MISMATCH - GOFLIX_BOT_TOKEN here is not the same token the bot is using"
     return JSONResponse({
         "page": "upi_pay.py is live on this server",
-        "UPI_ID": "ok" if (UPI_ID and _VPA_RE.match(UPI_ID)) else "MISSING or invalid - add UPI_ID to this service",
+        "payee": "taken from the bot's signed link" if pa else "this server's UPI_ID (old-style link)",
+        "UPI_ID (only used for old links)": "ok" if (UPI_ID and _VPA_RE.match(UPI_ID)) else "not set - fine for new links",
         "secret": secret,
         "signature": signature,
     })
